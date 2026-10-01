@@ -3,8 +3,10 @@
 #include <QtTest>
 
 #include "clipboardbundle.h"
+#include "clipboardsyncstate.h"
 
 using namespace ClipboardBundle;
+using Action = ClipboardSyncState::Action;
 
 static const char* kPngHex =
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
@@ -18,6 +20,14 @@ private slots:
     void bundleSharedVectors();
     void bundleRejectsInputOverLimit();
     void bundleFitToLimitDropsImageFirst();
+    void stateUnfocusedHostChangeFetchesFull();
+    void stateFocusedTextChangeSchedulesQuickFetch();
+    void stateImageOnlyWaitsForFocusLoss();
+    void stateQuickFetchLeavesImagePending();
+    void stateEmptyQuickFetchKeepsImagePending();
+    void stateFullFetchCompletesEvenIfImageDropped();
+    void statePushRules();
+    void stateHostBurstCoalesces();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -76,6 +86,96 @@ void ClipboardTests::bundleFitToLimitDropsImageFirst()
     QVERIFY(fitToLimit(small, 1024));
     QCOMPARE(small.size(), 2);
     QCOMPARE(maskOf(small), FormatText | FormatPng);
+}
+
+static ClipboardSyncState focusedState()
+{
+    ClipboardSyncState state;
+    state.onFocusGained(1, false);
+    state.onPushSucceeded(1);
+    return state;
+}
+
+void ClipboardTests::stateUnfocusedHostChangeFetchesFull()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(5, FormatText), Action::FetchFull);
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+}
+
+void ClipboardTests::stateFocusedTextChangeSchedulesQuickFetch()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(5, FormatText | FormatHtml), Action::ScheduleQuickFetch);
+    state.onFetchSucceeded(5, FormatText | FormatHtml, 2, false);
+    QVERIFY(!state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::None);
+}
+
+void ClipboardTests::stateImageOnlyWaitsForFocusLoss()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(6, FormatPng), Action::None);
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+}
+
+void ClipboardTests::stateQuickFetchLeavesImagePending()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(7, FormatAll), Action::ScheduleQuickFetch);
+    state.onFetchSucceeded(7, FormatText | FormatHtml | FormatRtf, 3, false);
+    QVERIFY(state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+    state.onFetchSucceeded(7, FormatAll, 4, true);
+    QVERIFY(!state.hostDataMissing());
+}
+
+void ClipboardTests::stateEmptyQuickFetchKeepsImagePending()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(8, FormatText | FormatPng), Action::ScheduleQuickFetch);
+    state.onFetchEmpty(false);
+    QVERIFY(state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+    state.onFetchEmpty(true);
+    QVERIFY(!state.hostDataMissing());
+}
+
+void ClipboardTests::stateFullFetchCompletesEvenIfImageDropped()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(9, FormatText | FormatPng), Action::FetchFull);
+    state.onFetchSucceeded(9, FormatText, 5, true);
+    QVERIFY(!state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::None);
+}
+
+void ClipboardTests::statePushRules()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onFocusGained(10, false), Action::Push);
+    state.onPushSucceeded(10);
+    state.onFocusLost();
+    QCOMPARE(state.onFocusGained(10, false), Action::None);  // unchanged pasteboard
+    state.onFocusLost();
+    QCOMPARE(state.onFocusGained(11, true), Action::None);   // concealed/transient data
+    state.onFocusLost();
+    QCOMPARE(state.onHostChanged(12, FormatText), Action::FetchFull);
+    state.onFetchSucceeded(12, FormatText, 13, true);
+    QCOMPARE(state.onFocusGained(13, false), Action::None);  // our own write
+    state.onFocusLost();
+    QCOMPARE(state.onFocusGained(14, false), Action::Push);  // user copied something new
+}
+
+void ClipboardTests::stateHostBurstCoalesces()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(20, FormatText), Action::ScheduleQuickFetch);
+    QCOMPARE(state.onHostChanged(21, FormatText), Action::ScheduleQuickFetch);
+    state.onFetchSucceeded(20, FormatText, 2, false);   // stale response
+    QVERIFY(state.hostDataMissing());
+    state.onFetchSucceeded(21, FormatText, 3, false);
+    QVERIFY(!state.hostDataMissing());
 }
 
 QTEST_GUILESS_MAIN(ClipboardTests)

@@ -555,8 +555,8 @@ win32 {
 }
 macx {
     # Create Info.plist in object dir with the correct version string
-    system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
-    system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
+    system(cp $$shell_quote($$PWD/Info.plist) $$shell_quote($$OUT_PWD/Info.plist))
+    system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$shell_quote($$OUT_PWD/Info.plist))
 
     QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
 

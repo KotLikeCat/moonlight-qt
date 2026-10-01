@@ -11,6 +11,7 @@ INCLUDEPATH += $$CLIPBOARD_DIR
 SOURCES += \
     tst_clipboard.mm \
     $$CLIPBOARD_DIR/clipboardbundle.cpp \
-    $$CLIPBOARD_DIR/clipboardsyncstate.cpp
+    $$CLIPBOARD_DIR/clipboardsyncstate.cpp \
+    $$CLIPBOARD_DIR/macpasteboard.mm
 
 LIBS += -framework AppKit

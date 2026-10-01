@@ -4,6 +4,7 @@
 
 #include "clipboardbundle.h"
 #include "clipboardsyncstate.h"
+#include "macpasteboard.h"
 
 using namespace ClipboardBundle;
 using Action = ClipboardSyncState::Action;
@@ -29,6 +30,10 @@ private slots:
     void statePushRules();
     void stateHostBurstCoalesces();
     void stateStaleEmptyReplyKeepsNewVersionPending();
+    void pasteboardRoundTrip();
+    void pasteboardDetectsSensitiveData();
+    void pasteboardConvertsTiffToPng();
+    void pasteboardIgnoresFileOnlyContent();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -188,6 +193,73 @@ void ClipboardTests::stateStaleEmptyReplyKeepsNewVersionPending()
     QVERIFY(state.hostDataMissing());
     state.onFetchEmpty(31, false);
     QVERIFY(!state.hostDataMissing());
+}
+
+static NSData* toNSData(const QByteArray& bytes)
+{
+    return [NSData dataWithBytes:bytes.constData() length:(NSUInteger)bytes.size()];
+}
+
+void ClipboardTests::pasteboardRoundTrip()
+{
+    MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.roundtrip"));
+    const QVector<Item> items {
+        {ItemType::Text, QByteArray("Привет\nмир")},
+        {ItemType::Html, QByteArray("<b>жирный</b>")},
+        {ItemType::Rtf, QByteArray("{\\rtf1\\ansi hello}")},
+        {ItemType::Png, QByteArray::fromHex(kPngHex)},
+    };
+    const long changeCount = board.write(items);
+    QCOMPARE(board.changeCount(), changeCount);
+    const QVector<Item> back = board.read();
+    QCOMPARE(back.size(), 4);
+    for (int i = 0; i < 4; i++) {
+        QVERIFY(back[i].type == items[i].type);
+        QCOMPARE(back[i].data, items[i].data);
+    }
+    QVERIFY(!board.hasSensitiveData());
+    board.releaseForTests();
+}
+
+void ClipboardTests::pasteboardDetectsSensitiveData()
+{
+    NSPasteboard* raw = [NSPasteboard pasteboardWithName:@"com.moonlight.clipboard-tests.sensitive"];
+    [raw clearContents];
+    [raw setString:@"secret" forType:NSPasteboardTypeString];
+    [raw setData:[NSData data] forType:@"org.nspasteboard.ConcealedType"];
+    MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.sensitive"));
+    QVERIFY(board.hasSensitiveData());
+    [raw clearContents];
+    [raw setString:@"public" forType:NSPasteboardTypeString];
+    QVERIFY(!board.hasSensitiveData());
+    board.releaseForTests();
+}
+
+void ClipboardTests::pasteboardConvertsTiffToPng()
+{
+    NSBitmapImageRep* rep = [NSBitmapImageRep imageRepWithData:toNSData(QByteArray::fromHex(kPngHex))];
+    NSPasteboard* raw = [NSPasteboard pasteboardWithName:@"com.moonlight.clipboard-tests.tiff"];
+    [raw clearContents];
+    [raw setData:[rep TIFFRepresentation] forType:NSPasteboardTypeTIFF];
+    MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.tiff"));
+    const QVector<Item> items = board.read();
+    QCOMPARE(items.size(), 1);
+    QVERIFY(items[0].type == ItemType::Png);
+    QVERIFY(items[0].data.startsWith(QByteArray("\x89PNG\r\n\x1a\n", 8)));
+    board.releaseForTests();
+}
+
+void ClipboardTests::pasteboardIgnoresFileOnlyContent()
+{
+    // Finder puts a file URL, the file name as text and an icon; files are not synced yet.
+    NSPasteboard* raw = [NSPasteboard pasteboardWithName:@"com.moonlight.clipboard-tests.files"];
+    [raw clearContents];
+    [raw declareTypes:@[NSPasteboardTypeFileURL, NSPasteboardTypeString] owner:nil];
+    [raw setString:@"file:///tmp/example.txt" forType:NSPasteboardTypeFileURL];
+    [raw setString:@"example.txt" forType:NSPasteboardTypeString];
+    MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.files"));
+    QVERIFY(board.read().isEmpty());
+    board.releaseForTests();
 }
 
 QTEST_GUILESS_MAIN(ClipboardTests)

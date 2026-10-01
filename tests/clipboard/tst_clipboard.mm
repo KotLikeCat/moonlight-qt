@@ -28,6 +28,7 @@ private slots:
     void stateFullFetchCompletesEvenIfImageDropped();
     void statePushRules();
     void stateHostBurstCoalesces();
+    void stateStaleEmptyReplyKeepsNewVersionPending();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -134,10 +135,10 @@ void ClipboardTests::stateEmptyQuickFetchKeepsImagePending()
 {
     ClipboardSyncState state = focusedState();
     QCOMPARE(state.onHostChanged(8, FormatText | FormatPng), Action::ScheduleQuickFetch);
-    state.onFetchEmpty(false);
+    state.onFetchEmpty(8, false);
     QVERIFY(state.hostDataMissing());
     QCOMPARE(state.onFocusLost(), Action::FetchFull);
-    state.onFetchEmpty(true);
+    state.onFetchEmpty(8, true);
     QVERIFY(!state.hostDataMissing());
 }
 
@@ -175,6 +176,17 @@ void ClipboardTests::stateHostBurstCoalesces()
     state.onFetchSucceeded(20, FormatText, 2, false);   // stale response
     QVERIFY(state.hostDataMissing());
     state.onFetchSucceeded(21, FormatText, 3, false);
+    QVERIFY(!state.hostDataMissing());
+}
+
+void ClipboardTests::stateStaleEmptyReplyKeepsNewVersionPending()
+{
+    ClipboardSyncState state = focusedState();
+    QCOMPARE(state.onHostChanged(30, FormatText), Action::ScheduleQuickFetch);
+    QCOMPARE(state.onHostChanged(31, FormatText), Action::ScheduleQuickFetch);
+    state.onFetchEmpty(30, false);
+    QVERIFY(state.hostDataMissing());
+    state.onFetchEmpty(31, false);
     QVERIFY(!state.hostDataMissing());
 }
 

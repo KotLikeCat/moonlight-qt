@@ -19,7 +19,7 @@ public:
     Action onFocusLost();
     Action onFocusGained(long macChangeCount, bool macHasSensitiveData);
     void onFetchSucceeded(uint32_t hostSeq, uint32_t receivedFormats, long macChangeCountAfterWrite, bool fullFetch);
-    void onFetchEmpty(bool fullFetch);
+    void onFetchEmpty(uint32_t hostSeq, bool fullFetch);
     void onPushSucceeded(long macChangeCount);
     bool hostDataMissing() const;
 

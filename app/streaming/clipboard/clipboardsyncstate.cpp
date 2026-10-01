@@ -40,11 +40,15 @@ void ClipboardSyncState::onFetchSucceeded(uint32_t hostSeq, uint32_t receivedFor
     m_OwnChangeCount = macChangeCountAfterWrite;
 }
 
-void ClipboardSyncState::onFetchEmpty(bool fullFetch)
+void ClipboardSyncState::onFetchEmpty(uint32_t hostSeq, bool fullFetch)
 {
     m_HasApplied = true;
-    m_AppliedSeq = m_PendingSeq;
-    m_AppliedFormats = fullFetch ? m_PendingFormats : (m_PendingFormats & kQuickFormats);
+    m_AppliedSeq = hostSeq;
+    if (m_HasPending && hostSeq == m_PendingSeq) {
+        m_AppliedFormats = fullFetch ? m_PendingFormats : (m_PendingFormats & kQuickFormats);
+    } else {
+        m_AppliedFormats = 0;
+    }
 }
 
 void ClipboardSyncState::onPushSucceeded(long macChangeCount)

@@ -6,6 +6,7 @@
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 
+#include <QCoreApplication>
 #include <QThread>
 #include <QTimer>
 #include <QtDebug>
@@ -29,6 +30,9 @@ ClipboardSync::ClipboardSync(NvComputer* computer)
     : m_Computer(computer)
 {
     QThread* thread = new QThread();
+    // We are constructed on a short-lived thread; give the QThread the main thread's
+    // affinity so the queued deleteLater from finished() is actually processed.
+    thread->moveToThread(QCoreApplication::instance()->thread());
     thread->setObjectName("ClipboardSync");
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     moveToThread(thread);
@@ -45,45 +49,94 @@ void ClipboardSync::initInWorker()
     m_QuickFetchTimer->setSingleShot(true);
     m_QuickFetchTimer->setInterval(kQuickFetchDelayMs);
     connect(m_QuickFetchTimer, &QTimer::timeout, this, [this]() {
-        if (!m_Disabled && m_State.hostDataMissing()) {
-            fetch(kQuickFormats);
-        }
+        runOrDefer([this]() {
+            if (!m_Disabled && m_State.hostDataMissing()) {
+                fetch(kQuickFormats);
+            }
+        });
     });
 }
 
 void ClipboardSync::notifyHostChanged(uint32_t seq, uint32_t formats)
 {
     QMetaObject::invokeMethod(this, [this, seq, formats]() {
-        handle(m_State.onHostChanged(seq, formats));
+        runOrDefer([this, seq, formats]() {
+            handle(m_State.onHostChanged(seq, formats));
+        });
     }, Qt::QueuedConnection);
 }
 
 void ClipboardSync::notifyFocusGained()
 {
     QMetaObject::invokeMethod(this, [this]() {
-        handle(m_State.onFocusGained(m_Pasteboard->changeCount(), m_Pasteboard->hasSensitiveData()));
+        runOrDefer([this]() {
+            handle(m_State.onFocusGained(m_Pasteboard->changeCount(), m_Pasteboard->hasSensitiveData()));
+        });
     }, Qt::QueuedConnection);
 }
 
 void ClipboardSync::notifyFocusLost()
 {
     QMetaObject::invokeMethod(this, [this]() {
-        m_QuickFetchTimer->stop();
-        handle(m_State.onFocusLost());
+        runOrDefer([this]() {
+            m_QuickFetchTimer->stop();
+            handle(m_State.onFocusLost());
+        });
     }, Qt::QueuedConnection);
 }
 
 void ClipboardSync::shutdownAsync()
 {
     QMetaObject::invokeMethod(this, [this]() {
-        delete m_Http;
-        m_Http = nullptr;
-        delete m_Pasteboard;
-        m_Pasteboard = nullptr;
-        QThread* thread = this->thread();
-        deleteLater();   // processed when the thread finishes
-        thread->quit();
+        m_ShutdownRequested = true;
+        if (!m_InRequest) {
+            finishShutdown();
+        }
+        // Otherwise the in-flight request calls finishShutdown() when it returns.
     }, Qt::QueuedConnection);
+}
+
+void ClipboardSync::runOrDefer(std::function<void()> work)
+{
+    if (m_ShutdownRequested) {
+        return;
+    }
+    if (m_InRequest) {
+        m_Deferred.push_back(std::move(work));
+        return;
+    }
+    work();
+    drainDeferred();
+}
+
+void ClipboardSync::drainDeferred()
+{
+    // Runs outside any request; drained items may start requests, which defer
+    // further events into the same queue that this loop keeps consuming.
+    while (!m_Deferred.empty() && !m_ShutdownRequested) {
+        std::function<void()> work = std::move(m_Deferred.front());
+        m_Deferred.pop_front();
+        work();
+    }
+}
+
+void ClipboardSync::finishShutdown()
+{
+    if (m_ShutdownFinished) {
+        return;
+    }
+    m_ShutdownFinished = true;
+    if (m_QuickFetchTimer != nullptr) {
+        m_QuickFetchTimer->stop();
+    }
+    delete m_Http;
+    m_Http = nullptr;
+    delete m_Pasteboard;
+    m_Pasteboard = nullptr;
+    m_Deferred.clear();
+    QThread* thread = this->thread();
+    deleteLater();   // processed when the thread finishes
+    thread->quit();
 }
 
 void ClipboardSync::handle(ClipboardSyncState::Action action)
@@ -109,8 +162,14 @@ void ClipboardSync::handle(ClipboardSyncState::Action action)
 void ClipboardSync::fetch(uint32_t formatsMask)
 {
     const bool fullFetch = formatsMask == 0;
+    m_InRequest = true;
     const NvHTTP::ClipboardResponse response =
             m_Http->getClipboardBundle(formatsMask, fullFetch ? kImageTimeoutMs : kSmallTimeoutMs);
+    m_InRequest = false;
+    if (m_ShutdownRequested) {
+        finishShutdown();
+        return;
+    }
 
     if (response.httpStatus == 401 || response.httpStatus == 403) {
         disable("the host denied clipboard access");
@@ -154,7 +213,13 @@ void ClipboardSync::push()
 
     const bool hasImage = (ClipboardBundle::maskOf(items) & ClipboardBundle::FormatPng) != 0;
     const QByteArray bundle = ClipboardBundle::encode(items);
+    m_InRequest = true;
     const int status = m_Http->postClipboardBundle(bundle, hasImage ? kImageTimeoutMs : kSmallTimeoutMs);
+    m_InRequest = false;
+    if (m_ShutdownRequested) {
+        finishShutdown();
+        return;
+    }
     if (status == 401 || status == 403) {
         disable("the host denied clipboard access");
         return;

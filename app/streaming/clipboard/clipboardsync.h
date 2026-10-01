@@ -5,6 +5,8 @@
 #include <QObject>
 
 #include <cstdint>
+#include <deque>
+#include <functional>
 
 class MacPasteboard;
 class NvComputer;
@@ -34,6 +36,9 @@ private:
     void fetch(uint32_t formatsMask);
     void push();
     void disable(const char* reason);
+    void runOrDefer(std::function<void()> work);
+    void drainDeferred();
+    void finishShutdown();
 
     NvComputer* m_Computer;
     NvHTTP* m_Http = nullptr;
@@ -41,4 +46,10 @@ private:
     QTimer* m_QuickFetchTimer = nullptr;
     ClipboardSyncState m_State;
     bool m_Disabled = false;
+    // NvHTTP spins a nested event loop, so queued events (notifications, timers,
+    // shutdown) can arrive while a request is in flight; they are deferred.
+    bool m_InRequest = false;
+    bool m_ShutdownRequested = false;
+    bool m_ShutdownFinished = false;
+    std::deque<std::function<void()>> m_Deferred;
 };

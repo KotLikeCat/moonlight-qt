@@ -204,6 +204,8 @@ SOURCES += \
     gui/sdlgamepadkeynavigation.cpp \
     streaming/video/overlaymanager.cpp \
     backend/systemproperties.cpp \
+    streaming/clipboard/clipboardbundle.cpp \
+    streaming/clipboard/clipboardsyncstate.cpp \
     wm.cpp
 
 HEADERS += \
@@ -227,6 +229,8 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    streaming/clipboard/clipboardbundle.h \
+    streaming/clipboard/clipboardsyncstate.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/audio/renderers/renderer.h \
@@ -414,6 +418,14 @@ macx {
 
     HEADERS += \
         streaming/video/ffmpeg-renderers/vt.h
+
+    SOURCES += \
+        streaming/clipboard/clipboardsync.cpp \
+        streaming/clipboard/macpasteboard.mm
+
+    HEADERS += \
+        streaming/clipboard/clipboardsync.h \
+        streaming/clipboard/macpasteboard.h
 }
 discord-rpc {
     message(Discord integration enabled)

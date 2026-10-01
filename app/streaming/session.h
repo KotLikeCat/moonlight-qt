@@ -89,6 +89,10 @@ public:
     }
 };
 
+#ifdef Q_OS_DARWIN
+class ClipboardSync;
+#endif
+
 class Session : public QObject
 {
     Q_OBJECT
@@ -203,6 +207,9 @@ private:
     void clLogMessage(const char* format, ...);
 
     static
+    void clClipboardChanged(uint32_t seq, uint32_t formats);
+
+    static
     void clRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor);
 
     static
@@ -250,6 +257,9 @@ private:
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
+#ifdef Q_OS_DARWIN
+    ClipboardSync* m_ClipboardSync = nullptr;
+#endif
     NvApp m_App;
     SDL_Window* m_Window;
     IVideoDecoder* m_VideoDecoder;

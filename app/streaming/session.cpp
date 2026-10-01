@@ -4,6 +4,9 @@
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
+#ifdef Q_OS_DARWIN
+#include "streaming/clipboard/clipboardsync.h"
+#endif
 #include "SDL_compat.h"
 #include "utils.h"
 
@@ -60,7 +63,8 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clRumbleTriggers,
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
-    Session::clSetAdaptiveTriggers
+    Session::clSetAdaptiveTriggers,
+    Session::clClipboardChanged
 };
 
 Session* Session::s_ActiveSession;
@@ -210,6 +214,20 @@ void Session::clSetHdrMode(bool enabled)
         }
         SDL_UnlockMutex(s_ActiveSession->m_DecoderLock);
     }
+}
+
+void Session::clClipboardChanged(uint32_t seq, uint32_t formats)
+{
+#ifdef Q_OS_DARWIN
+    // Invoked on moonlight-common-c's async callback thread. m_ClipboardSync is cleared
+    // only after LiStopConnection() returns, so it stays valid for every callback.
+    if (s_ActiveSession != nullptr && s_ActiveSession->m_ClipboardSync != nullptr) {
+        s_ActiveSession->m_ClipboardSync->notifyHostChanged(seq, formats);
+    }
+#else
+    Q_UNUSED(seq);
+    Q_UNUSED(formats);
+#endif
 }
 
 void Session::clRumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger)
@@ -1290,6 +1308,12 @@ private:
 
         // Finish cleanup of the connection state
         LiStopConnection();
+#ifdef Q_OS_DARWIN
+        if (m_Session->m_ClipboardSync != nullptr) {
+            m_Session->m_ClipboardSync->shutdownAsync();
+            m_Session->m_ClipboardSync = nullptr;
+        }
+#endif
 
         // Perform a best-effort app quit
         if (shouldQuit) {
@@ -1703,10 +1727,22 @@ bool Session::startConnectionAsync()
                                                                          false);
     }
 
+#ifdef Q_OS_DARWIN
+    // Created before the connection starts: the host greets new sessions with its
+    // current clipboard as soon as the control stream connects.
+    m_ClipboardSync = ClipboardSync::createForSession(m_Computer, m_Preferences->clipboardSync);
+#endif
+
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
     if (err != 0) {
+#ifdef Q_OS_DARWIN
+        if (m_ClipboardSync != nullptr) {
+            m_ClipboardSync->shutdownAsync();
+            m_ClipboardSync = nullptr;
+        }
+#endif
         // We already displayed an error dialog in the stage failure
         // listener.
         return false;
@@ -2049,12 +2085,22 @@ void Session::exec()
                     m_AudioMuted = true;
                 }
                 m_InputHandler->notifyFocusLost();
+#ifdef Q_OS_DARWIN
+                if (m_ClipboardSync != nullptr) {
+                    m_ClipboardSync->notifyFocusLost();
+                }
+#endif
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
+#ifdef Q_OS_DARWIN
+                if (m_ClipboardSync != nullptr) {
+                    m_ClipboardSync->notifyFocusGained();
+                }
+#endif
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();

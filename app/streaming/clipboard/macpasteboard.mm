@@ -100,9 +100,16 @@ long MacPasteboard::write(const QVector<Item>& items)
             case ItemType::Text:
                 [pasteboard setString:QString::fromUtf8(item.data).toNSString() forType:NSPasteboardTypeString];
                 break;
-            case ItemType::Html:
-                [pasteboard setData:data forType:NSPasteboardTypeHTML];
+            case ItemType::Html: {
+                // The host sends a UTF-8 fragment without a charset; AppKit would assume Latin-1.
+                QByteArray html = item.data;
+                if (!html.left(1024).toLower().contains("charset")) {
+                    html.prepend("<meta charset=\"utf-8\">");
+                }
+                NSData* htmlData = [NSData dataWithBytes:html.constData() length:(NSUInteger)html.size()];
+                [pasteboard setData:htmlData forType:NSPasteboardTypeHTML];
                 break;
+            }
             case ItemType::Rtf:
                 [pasteboard setData:data forType:NSPasteboardTypeRTF];
                 break;

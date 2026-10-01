@@ -50,7 +50,7 @@ void ClipboardSync::initInWorker()
     m_QuickFetchTimer->setInterval(kQuickFetchDelayMs);
     connect(m_QuickFetchTimer, &QTimer::timeout, this, [this]() {
         runOrDefer([this]() {
-            if (!m_Disabled && m_State.hostDataMissing()) {
+            if (!m_FetchDisabled && m_State.hostDataMissing()) {
                 fetch(kQuickFormats);
             }
         });
@@ -141,20 +141,23 @@ void ClipboardSync::finishShutdown()
 
 void ClipboardSync::handle(ClipboardSyncState::Action action)
 {
-    if (m_Disabled) {
-        return;
-    }
     switch (action) {
     case ClipboardSyncState::Action::None:
         break;
     case ClipboardSyncState::Action::ScheduleQuickFetch:
-        m_QuickFetchTimer->start();
+        if (!m_FetchDisabled) {
+            m_QuickFetchTimer->start();
+        }
         break;
     case ClipboardSyncState::Action::FetchFull:
-        fetch(0);
+        if (!m_FetchDisabled) {
+            fetch(0);
+        }
         break;
     case ClipboardSyncState::Action::Push:
-        push();
+        if (!m_PushDisabled) {
+            push();
+        }
         break;
     }
 }
@@ -162,6 +165,7 @@ void ClipboardSync::handle(ClipboardSyncState::Action action)
 void ClipboardSync::fetch(uint32_t formatsMask)
 {
     const bool fullFetch = formatsMask == 0;
+    const long changeCountBefore = m_Pasteboard->changeCount();
     m_InRequest = true;
     const NvHTTP::ClipboardResponse response =
             m_Http->getClipboardBundle(formatsMask, fullFetch ? kImageTimeoutMs : kSmallTimeoutMs);
@@ -172,7 +176,10 @@ void ClipboardSync::fetch(uint32_t formatsMask)
     }
 
     if (response.httpStatus == 401 || response.httpStatus == 403) {
-        disable("the host denied clipboard access");
+        if (!m_FetchDisabled) {
+            m_FetchDisabled = true;
+            qWarning() << "Clipboard fetch disabled for this session: the host denied clipboard access";
+        }
         return;
     }
     if (response.httpStatus == 204) {
@@ -195,6 +202,18 @@ void ClipboardSync::fetch(uint32_t formatsMask)
         return;
     }
 
+    if (decoded.items.isEmpty()) {
+        // Only formats this client does not know: same as an empty reply.
+        m_State.onFetchEmpty(response.seq, fullFetch);
+        return;
+    }
+    if (m_Pasteboard->changeCount() != changeCountBefore) {
+        // The user copied on the Mac during the request; keep their newer copy.
+        m_State.onFetchEmpty(response.seq, true);
+        qInfo() << "Clipboard: Mac clipboard changed during fetch, discarding host data";
+        return;
+    }
+
     const long changeCount = m_Pasteboard->write(decoded.items);
     const quint32 received = ClipboardBundle::maskOf(decoded.items);
     m_State.onFetchSucceeded(response.seq, received, changeCount, fullFetch);
@@ -207,7 +226,7 @@ void ClipboardSync::push()
     QVector<ClipboardBundle::Item> items = m_Pasteboard->read();
     if (items.isEmpty() || !ClipboardBundle::fitToLimit(items, ClipboardBundle::MaxBytes)) {
         // Nothing we can send for this pasteboard version; don't retry it.
-        m_State.onPushSucceeded(changeCount);
+        m_State.onPushSkipped(changeCount);
         return;
     }
 
@@ -221,7 +240,15 @@ void ClipboardSync::push()
         return;
     }
     if (status == 401 || status == 403) {
-        disable("the host denied clipboard access");
+        if (!m_PushDisabled) {
+            m_PushDisabled = true;
+            qWarning() << "Clipboard push disabled for this session: the host denied clipboard access";
+        }
+        return;
+    }
+    if (status == 413 || status == 400) {
+        qWarning() << "Clipboard push rejected by the host with HTTP status" << status << "- not retrying this clipboard";
+        m_State.onPushSkipped(changeCount);
         return;
     }
     if (status != 200) {
@@ -230,10 +257,4 @@ void ClipboardSync::push()
     }
     m_State.onPushSucceeded(changeCount);
     qInfo() << "Clipboard: sent Mac clipboard, formats" << ClipboardBundle::maskOf(items) << "bytes" << bundle.size();
-}
-
-void ClipboardSync::disable(const char* reason)
-{
-    m_Disabled = true;
-    qWarning() << "Clipboard sync disabled for this session:" << reason;
 }

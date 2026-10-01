@@ -28,6 +28,11 @@ private slots:
     void stateEmptyQuickFetchKeepsImagePending();
     void stateFullFetchCompletesEvenIfImageDropped();
     void statePushRules();
+    void stateGreetingBeforeFirstFocusMacWins();
+    void stateGreetingBeforeFirstFocusSensitiveMacFetchesHost();
+    void statePushSkippedKeepsHostPending();
+    void statePushDoesNotSupersedeNewerHostChange();
+    void pasteboardHtmlGetsUtf8Charset();
     void stateHostBurstCoalesces();
     void stateStaleEmptyReplyKeepsNewVersionPending();
     void pasteboardRoundTrip();
@@ -105,6 +110,9 @@ static ClipboardSyncState focusedState()
 void ClipboardTests::stateUnfocusedHostChangeFetchesFull()
 {
     ClipboardSyncState state;
+    state.onFocusGained(1, false);
+    state.onPushSucceeded(1);
+    state.onFocusLost();
     QCOMPARE(state.onHostChanged(5, FormatText), Action::FetchFull);
     QCOMPARE(state.onFocusLost(), Action::FetchFull);
 }
@@ -150,6 +158,9 @@ void ClipboardTests::stateEmptyQuickFetchKeepsImagePending()
 void ClipboardTests::stateFullFetchCompletesEvenIfImageDropped()
 {
     ClipboardSyncState state;
+    state.onFocusGained(1, false);
+    state.onPushSucceeded(1);
+    state.onFocusLost();
     QCOMPARE(state.onHostChanged(9, FormatText | FormatPng), Action::FetchFull);
     state.onFetchSucceeded(9, FormatText, 5, true);
     QVERIFY(!state.hostDataMissing());
@@ -171,6 +182,45 @@ void ClipboardTests::statePushRules()
     QCOMPARE(state.onFocusGained(13, false), Action::None);  // our own write
     state.onFocusLost();
     QCOMPARE(state.onFocusGained(14, false), Action::Push);  // user copied something new
+}
+
+void ClipboardTests::stateGreetingBeforeFirstFocusMacWins()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(5, FormatText), Action::None);
+    QCOMPARE(state.onFocusGained(10, false), Action::Push);
+    state.onPushSucceeded(10);
+    QVERIFY(!state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::None);
+}
+
+void ClipboardTests::stateGreetingBeforeFirstFocusSensitiveMacFetchesHost()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(5, FormatText | FormatPng), Action::None);
+    QCOMPARE(state.onFocusGained(10, true), Action::ScheduleQuickFetch);
+    state.onFetchSucceeded(5, FormatText, 11, false);
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+}
+
+void ClipboardTests::statePushSkippedKeepsHostPending()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(6, FormatText), Action::None);
+    QCOMPARE(state.onFocusGained(10, false), Action::Push);
+    state.onPushSkipped(10);
+    QVERIFY(state.hostDataMissing());
+    QCOMPARE(state.onFocusLost(), Action::FetchFull);
+}
+
+void ClipboardTests::statePushDoesNotSupersedeNewerHostChange()
+{
+    ClipboardSyncState state;
+    QCOMPARE(state.onHostChanged(5, FormatText), Action::None);
+    QCOMPARE(state.onFocusGained(10, false), Action::Push);
+    QCOMPARE(state.onHostChanged(6, FormatText), Action::ScheduleQuickFetch);
+    state.onPushSucceeded(10);
+    QVERIFY(state.hostDataMissing());
 }
 
 void ClipboardTests::stateHostBurstCoalesces()
@@ -215,9 +265,34 @@ void ClipboardTests::pasteboardRoundTrip()
     QCOMPARE(back.size(), 4);
     for (int i = 0; i < 4; i++) {
         QVERIFY(back[i].type == items[i].type);
-        QCOMPARE(back[i].data, items[i].data);
+        if (items[i].type == ItemType::Html) {
+            // The writer prepends a charset declaration.
+            QVERIFY(back[i].data.endsWith(items[i].data));
+        }
+        else {
+            QCOMPARE(back[i].data, items[i].data);
+        }
     }
     QVERIFY(!board.hasSensitiveData());
+    board.releaseForTests();
+}
+
+void ClipboardTests::pasteboardHtmlGetsUtf8Charset()
+{
+    const QString name = QStringLiteral("com.moonlight.clipboard-tests.html");
+    MacPasteboard board(name);
+    NSPasteboard* raw = [NSPasteboard pasteboardWithName:name.toNSString()];
+    const QByteArray fragment("<b>жирный</b>");
+    board.write({{ItemType::Html, fragment}});
+    NSData* stored = [raw dataForType:@"public.html"];
+    const QByteArray out((const char*)stored.bytes, (qsizetype)stored.length);
+    QVERIFY(out.startsWith(QByteArray("<meta charset=\"utf-8\">")));
+    QVERIFY(out.contains(fragment));
+
+    const QByteArray withCharset("<meta http-equiv=\"Content-Type\" content=\"text/html; CHARSET=utf-8\"><i>x</i>");
+    board.write({{ItemType::Html, withCharset}});
+    stored = [raw dataForType:@"public.html"];
+    QCOMPARE(QByteArray((const char*)stored.bytes, (qsizetype)stored.length), withCharset);
     board.releaseForTests();
 }
 

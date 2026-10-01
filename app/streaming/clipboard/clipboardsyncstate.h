@@ -21,6 +21,7 @@ public:
     void onFetchSucceeded(uint32_t hostSeq, uint32_t receivedFormats, long macChangeCountAfterWrite, bool fullFetch);
     void onFetchEmpty(uint32_t hostSeq, bool fullFetch);
     void onPushSucceeded(long macChangeCount);
+    void onPushSkipped(long macChangeCount);
     bool hostDataMissing() const;
 
 private:
@@ -35,4 +36,7 @@ private:
     long m_LastSentChangeCount = -1;
     long m_OwnChangeCount = -1;
     bool m_Focused = false;
+    bool m_FocusKnown = false;
+    bool m_HasSupersede = false;
+    uint32_t m_SupersedeSeq = 0;
 };

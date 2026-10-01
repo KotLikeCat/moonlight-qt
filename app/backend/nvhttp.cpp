@@ -478,12 +478,8 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
     return ret;
 }
 
-QNetworkReply*
-NvHTTP::openConnection(QUrl baseUrl,
-                       QString command,
-                       QString arguments,
-                       int timeoutMs,
-                       NvLogLevel logLevel)
+QNetworkRequest
+NvHTTP::buildRequest(QUrl baseUrl, QString command, QString arguments)
 {
     // Port must be set
     Q_ASSERT(baseUrl.port(0) != 0);
@@ -514,9 +510,12 @@ NvHTTP::openConnection(QUrl baseUrl,
     request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
 #endif
 
-    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
-    QNetworkReply* reply = m_Nam->get(request);
+    return request;
+}
 
+void
+NvHTTP::waitForReply(QNetworkReply* reply, int timeoutMs, NvLogLevel logLevel)
+{
     // Run the request with a timeout if requested
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -525,7 +524,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     }
     if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
-        qInfo() << "Executing request:" << url.toString();
+        qInfo() << "Executing request:" << reply->url().toString();
     }
     loop.exec(QEventLoop::ExcludeUserInputEvents);
 
@@ -533,7 +532,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (!reply->isFinished())
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << "Aborting timed out request for" << url.toString();
+            qWarning() << "Aborting timed out request for" << reply->url().toString();
         }
         reply->abort();
     }
@@ -542,6 +541,20 @@ NvHTTP::openConnection(QUrl baseUrl,
     // If we couldn't use fine-grained connection idle timeouts, kill them all now
     m_Nam->clearAccessCache();
 #endif
+}
+
+QNetworkReply*
+NvHTTP::openConnection(QUrl baseUrl,
+                       QString command,
+                       QString arguments,
+                       int timeoutMs,
+                       NvLogLevel logLevel)
+{
+    QNetworkRequest request = buildRequest(baseUrl, command, arguments);
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+    waitForReply(reply, timeoutMs, logLevel);
     disconnect(sslErrorsConnection);
 
     // Handle error
@@ -571,4 +584,46 @@ NvHTTP::openConnection(QUrl baseUrl,
     }
 
     return reply;
+}
+
+NvHTTP::ClipboardResponse
+NvHTTP::getClipboardBundle(quint32 formatsMask, int timeoutMs)
+{
+    QString arguments = "type=bundle";
+    if (formatsMask != 0) {
+        arguments += "&formats=" + QString::number(formatsMask);
+    }
+    QNetworkRequest request = buildRequest(m_BaseUrlHttps, "actions/clipboard", arguments);
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->get(request);
+    waitForReply(reply, timeoutMs, NvLogLevel::NVLL_ERROR);
+    disconnect(sslErrorsConnection);
+
+    ClipboardResponse response;
+    response.httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (reply->hasRawHeader("X-Clipboard-Seq")) {
+        response.seq = reply->rawHeader("X-Clipboard-Seq").toUInt(&response.hasSeq);
+    }
+    if (response.httpStatus == 200) {
+        response.body = reply->readAll();
+    }
+    delete reply;
+    return response;
+}
+
+int
+NvHTTP::postClipboardBundle(const QByteArray& bundle, int timeoutMs)
+{
+    QNetworkRequest request = buildRequest(m_BaseUrlHttps, "actions/clipboard", "type=bundle");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->post(request, bundle);
+    waitForReply(reply, timeoutMs, NvLogLevel::NVLL_ERROR);
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    delete reply;
+    return status;
 }

@@ -965,6 +965,23 @@ Flickable {
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Mutes Moonlight's audio when you Alt+Tab out of the stream or click on a different window.")
                 }
+
+                CheckBox {
+                    id: clipboardSyncCheck
+                    width: parent.width
+                    text: qsTr("Sync clipboard with the host (text, rich text and images)")
+                    font.pointSize: 12
+                    visible: Qt.platform.os === "osx"
+                    checked: StreamingPreferences.clipboardSync
+                    onCheckedChanged: {
+                        StreamingPreferences.clipboardSync = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Copy on the host and paste on this Mac, and vice versa. This Mac's clipboard is sent to the host only when you switch to the stream window. Requires a host with clipboard sync and clipboard permissions for this client.")
+                }
             }
         }
 

@@ -184,7 +184,23 @@ public:
 
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
+
+    struct ClipboardResponse {
+        int httpStatus = 0;   // 0 = network error or timeout
+        quint32 seq = 0;
+        bool hasSeq = false;
+        QByteArray body;
+    };
+
+    // GET /actions/clipboard?type=bundle. formatsMask == 0 requests all formats.
+    ClipboardResponse getClipboardBundle(quint32 formatsMask, int timeoutMs);
+    // POST /actions/clipboard?type=bundle. Returns the HTTP status (0 = network error or timeout).
+    int postClipboardBundle(const QByteArray& bundle, int timeoutMs);
+
 private:
+    QNetworkRequest buildRequest(QUrl baseUrl, QString command, QString arguments);
+    void waitForReply(QNetworkReply* reply, int timeoutMs, NvLogLevel logLevel);
+
     void
     handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 

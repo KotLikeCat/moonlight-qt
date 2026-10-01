@@ -163,6 +163,9 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
         this->maxLumaPixelsHEVC = 0;
     }
 
+    QString clipboardSync = NvHTTP::getXmlString(serverInfo, "ClipboardSync");
+    this->clipboardSyncVersion = clipboardSync.isEmpty() ? 0 : clipboardSync.toInt();
+
     this->displayModes = NvHTTP::getDisplayModeList(serverInfo);
     std::stable_sort(this->displayModes.begin(), this->displayModes.end(),
                      [](const NvDisplayMode& mode1, const NvDisplayMode& mode2) {
@@ -568,6 +571,7 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(isSupportedServerVersion);
     ASSIGN_IF_CHANGED(isNvidiaServerSoftware);
     ASSIGN_IF_CHANGED(maxLumaPixelsHEVC);
+    ASSIGN_IF_CHANGED(clipboardSyncVersion);
     ASSIGN_IF_CHANGED(gpuModel);
     ASSIGN_IF_CHANGED_AND_NONNULL(serverCert);
     ASSIGN_IF_CHANGED_AND_NONEMPTY(displayModes);

@@ -100,6 +100,7 @@ public:
     int serverCodecModeSupport;
     QString gpuModel;
     bool isSupportedServerVersion;
+    int clipboardSyncVersion = 0;
 
     // Persisted traits
     NvAddress localAddress;

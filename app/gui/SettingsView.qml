@@ -971,6 +971,10 @@ Flickable {
                                 break
                             }
                         }
+
+                        // Size the box to the longest device name (other combo boxes get
+                        // this via activated(), which would also rewrite the preference)
+                        recalculateWidth()
                     }
 
                     // ::onActivated must be used, as it only listens for when the index is changed by a human
@@ -1042,6 +1046,10 @@ Flickable {
                                 break
                             }
                         }
+
+                        // Size the box to the longest device name (other combo boxes get
+                        // this via activated(), which would also rewrite the preference)
+                        recalculateWidth()
                     }
 
                     // ::onActivated must be used, as it only listens for when the index is changed by a human

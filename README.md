@@ -1,3 +1,8 @@
+**Fork note (KotLikeCat):** adds clipboard sync, stream audio output device selection and microphone passthrough for use with the [KotLikeCat/Vibepollo](https://github.com/KotLikeCat/Vibepollo/tree/feat/microphone) host. Designs:
+[audio output device](https://github.com/KotLikeCat/moonlight-qt/blob/feat/audio/docs/superpowers/specs/2026-10-01-audio-output-device-design.md),
+[microphone](https://github.com/KotLikeCat/Vibepollo/blob/feat/microphone/docs/superpowers/specs/2026-10-01-microphone-design.md).
+Mute the microphone during a stream with Control+Option+Shift+U (Ctrl+Alt+Shift+U on Windows/Linux).
+
 # Moonlight PC
 
 [Moonlight PC](https://moonlight-stream.org) is an open source PC client for NVIDIA GameStream and [Sunshine](https://github.com/LizardByte/Sunshine).

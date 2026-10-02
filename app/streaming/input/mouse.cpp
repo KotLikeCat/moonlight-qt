@@ -4,6 +4,10 @@
 #include "SDL_compat.h"
 #include "streaming/streamutils.h"
 
+#ifdef Q_OS_DARWIN
+#include <CoreGraphics/CoreGraphics.h>
+#endif
+
 void SdlInputHandler::notifyMouseLeave()
 {
     if (m_NeedsManualCaptureOnLeave) {
@@ -116,12 +120,25 @@ void SdlInputHandler::verifyRelativeMouseApplied()
     SDL_GetWindowSize(m_Window, &ww, &wh);
 
     if (gx < wx || gy < wy || gx >= wx + ww || gy >= wy + wh) {
+#ifdef Q_OS_DARWIN
+        // SDL3's Cocoa backend silently defers relative mode (and warps) while it believes the
+        // window is moving or a focus click is pending, and that state can get stuck after
+        // fullscreen/focus transitions. SDL already considers relative mode enabled and has
+        // hidden the cursor, so apply the missing OS-level part ourselves. SDL restores the
+        // association when relative mode is turned off.
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Relative mouse mode not applied by the OS (cursor at %d,%d outside window); confining cursor",
+                    gx, gy);
+        CGWarpMouseCursorPosition(CGPointMake(wx + ww / 2.0, wy + wh / 2.0));
+        CGAssociateMouseAndMouseCursorPosition(false);
+#else
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Relative mouse mode not applied by the OS (cursor at %d,%d outside window); re-applying",
                     gx, gy);
         SDL_SetRelativeMouseMode(SDL_FALSE);
         SDL_SetRelativeMouseMode(SDL_TRUE);
         SDL_WarpMouseInWindow(m_Window, ww / 2, wh / 2);
+#endif
     }
 }
 

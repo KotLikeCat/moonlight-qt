@@ -238,6 +238,7 @@ SdlInputHandler::~SdlInputHandler()
         }
     }
 
+    SDL_RemoveTimer(m_ReassertTimer);
     SDL_RemoveTimer(m_LongPressTimer);
     SDL_RemoveTimer(m_LeftButtonReleaseTimer);
     SDL_RemoveTimer(m_RightButtonReleaseTimer);
@@ -277,6 +278,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 
 void SdlInputHandler::notifyFocusLost()
 {
+    logCaptureState("FOCUS_LOST", false);
     // Release mouse cursor when another window is activated (e.g. by using ALT+TAB).
     // This lets user to interact with our window's title bar and with the buttons in it.
     // Doing this while the window is full-screen breaks the transition out of FS
@@ -290,8 +292,80 @@ void SdlInputHandler::notifyFocusLost()
     raiseAllKeys();
 }
 
+void SdlInputHandler::logCaptureState(const char* event, bool reasserted)
+{
+    Uint32 flags = m_Window ? SDL_GetWindowFlags(m_Window) : 0;
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Mouse capture: %s: relative=%d fake=%d fullscreen=%d input_focus=%d mouse_focus=%d reasserted=%d",
+                event,
+                SDL_GetRelativeMouseMode() ? 1 : 0,
+                m_FakeMouseCaptureActive ? 1 : 0,
+                (flags & SDL_WINDOW_FULLSCREEN) ? 1 : 0,
+                (flags & SDL_WINDOW_INPUT_FOCUS) ? 1 : 0,
+                (flags & SDL_WINDOW_MOUSE_FOCUS) ? 1 : 0,
+                reasserted ? 1 : 0);
+}
+
+// macOS may leave SDL's OS-level relative mode broken after focus/Space transitions
+// while SDL_GetRelativeMouseMode() still reports true, so toggle it off and on again.
+void SdlInputHandler::reassertCapture(const char* reason)
+{
+    if (m_Window == nullptr) {
+        return;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Mouse capture: re-asserting (%s)", reason);
+    m_LastReassertTicks = SDL_GetTicks();
+    m_HasReasserted = true;
+
+    if (SDL_GetRelativeMouseMode()) {
+        SDL_SetRelativeMouseMode(SDL_FALSE);
+        SDL_SetRelativeMouseMode(SDL_TRUE);
+
+        int w, h;
+        SDL_GetWindowSize(m_Window, &w, &h);
+        SDL_WarpMouseInWindow(m_Window, w / 2, h / 2);
+    }
+    else if (!m_FakeMouseCaptureActive) {
+        return;
+    }
+
+    updatePointerRegionLock();
+    updateKeyboardGrabState();
+}
+
+Uint32 SdlInputHandler::reassertTimerCallback(Uint32, void*)
+{
+    // Timer thread: only push an event, never touch SDL state
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = SDL_USEREVENT;
+    event.user.code = 106; // SDL_CODE_REASSERT_MOUSE_CAPTURE (session.cpp)
+    SDL_PushEvent(&event);
+    return 0;
+}
+
+void SdlInputHandler::handleDeferredCaptureReassert()
+{
+    m_ReassertTimer = 0;
+    bool focused = m_Window && (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS);
+    if (focused && isCaptureActive()) {
+        reassertCapture("focus gained");
+        logCaptureState("deferred re-assert", true);
+    }
+    else {
+        logCaptureState("deferred re-assert skipped", false);
+    }
+}
+
 void SdlInputHandler::notifyFocusGained()
 {
+    bool active = isCaptureActive();
+    logCaptureState("FOCUS_GAINED", false);
+    if (active) {
+        SDL_RemoveTimer(m_ReassertTimer);
+        m_ReassertTimer = SDL_AddTimer(250, reassertTimerCallback, this);
+    }
 }
 
 bool SdlInputHandler::isCaptureActive()

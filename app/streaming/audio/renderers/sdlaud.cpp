@@ -12,8 +12,9 @@ SdlAudioRenderer::SdlAudioRenderer(QString preferredDevice)
       m_PreferredDevice(preferredDevice),
       m_PreferredDeviceMissing(false)
 {
-    SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
-
+    // SDL refcounts subsystem init, and the microphone streamer may already hold
+    // the audio subsystem (e.g. when the renderer is re-created mid-stream), so
+    // we must not assume it is uninitialized. Init/Quit stay paired.
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: %s",

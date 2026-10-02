@@ -168,6 +168,7 @@ private:
         KeyComboTogglePointerRegionLock,
         KeyComboQuitAndExit,
         KeyComboToggleKeyboardGrab,
+        KeyComboToggleMicMute,
         KeyComboMax
     };
 

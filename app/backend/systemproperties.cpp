@@ -303,3 +303,28 @@ void SystemProperties::refreshDisplays()
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
+
+QStringList SystemProperties::getAudioInputDevices()
+{
+    QStringList devices;
+
+    // Init/Quit stay paired (SDL refcounts the subsystem)
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: %s",
+                     SDL_GetError());
+        return devices;
+    }
+
+    int count = SDL_GetNumAudioDevices(1);
+    for (int i = 0; i < count; i++) {
+        const char* name = SDL_GetAudioDeviceName(i, 1);
+        if (name != nullptr) {
+            devices.append(QString::fromUtf8(name));
+        }
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+
+    return devices;
+}

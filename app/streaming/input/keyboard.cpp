@@ -177,6 +177,16 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         updateKeyboardGrabState();
         break;
 
+    case KeyComboToggleMicMute:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected microphone mute toggle combo");
+
+        // Does nothing if microphone passthrough isn't active for this session
+        if (Session::s_ActiveSession != nullptr) {
+            Session::s_ActiveSession->toggleMicMute();
+        }
+        break;
+
     default:
         Q_UNREACHABLE();
     }

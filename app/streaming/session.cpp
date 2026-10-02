@@ -6,6 +6,8 @@
 #include <Limelight.h>
 #ifdef Q_OS_DARWIN
 #include "streaming/clipboard/clipboardsync.h"
+#include "streaming/audio/mic/micstreamer.h"
+#include "streaming/audio/audiodevice.h"
 #endif
 #include "SDL_compat.h"
 #include "utils.h"
@@ -1212,6 +1214,15 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
 
+    // Warn once per session if the chosen microphone is not connected
+    if (m_Preferences->micPassthrough && !m_Preferences->micDevice.isEmpty() &&
+            !MicStreamer::isToneModeRequested()) {
+        if (AudioDevice::resolve(MicStreamer::captureDeviceNames(), m_Preferences->micDevice).isEmpty()) {
+            emitLaunchWarning(tr("Microphone \"%1\" is not connected. Using the system default microphone.")
+                              .arg(m_Preferences->micDevice));
+        }
+    }
+
     // If nothing worked, warn the user that audio will not work
     if (!audioTestPassed) {
         emitLaunchWarning(tr("Failed to open audio device. Audio will be unavailable during this session."));
@@ -1305,6 +1316,9 @@ private:
         // try to interact with APIs that can only be called between
         // LiStartConnection() and LiStopConnection().
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
+
+        // The microphone streamer must stop sending before the connection goes away
+        m_Session->stopMicStreamer();
 
         // Finish cleanup of the connection state
         LiStopConnection();
@@ -1748,8 +1762,55 @@ bool Session::startConnectionAsync()
         return false;
     }
 
+    startMicStreamer();
+
     emit connectionStarted();
     return true;
+}
+
+void Session::startMicStreamer()
+{
+    if (!m_Preferences->micPassthrough) {
+        return;
+    }
+
+    bool toneMode = MicStreamer::isToneModeRequested();
+
+    if (!m_Computer->microphoneSupported) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone passthrough is enabled but the host does not advertise support");
+        return;
+    }
+
+    auto* streamer = new MicStreamer(m_Preferences->micDevice, toneMode);
+    if (!streamer->start()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Microphone streamer failed to start");
+        delete streamer;
+        return;
+    }
+
+    QMutexLocker locker(&m_MicLock);
+    m_MicStreamer = streamer;
+}
+
+void Session::stopMicStreamer()
+{
+    MicStreamer* streamer;
+    {
+        QMutexLocker locker(&m_MicLock);
+        streamer = m_MicStreamer;
+        m_MicStreamer = nullptr;
+    }
+    delete streamer;
+}
+
+void Session::toggleMicMute()
+{
+    QMutexLocker locker(&m_MicLock);
+    if (m_MicStreamer != nullptr) {
+        m_MicStreamer->toggleMute();
+    }
 }
 
 void Session::flushWindowEvents()

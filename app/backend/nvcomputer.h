@@ -101,6 +101,7 @@ public:
     QString gpuModel;
     bool isSupportedServerVersion;
     int clipboardSyncVersion = 0;
+    bool microphoneSupported = false;
 
     // Persisted traits
     NvAddress localAddress;

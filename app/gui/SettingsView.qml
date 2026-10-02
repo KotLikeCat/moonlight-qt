@@ -981,6 +981,72 @@ Flickable {
 
 
                 CheckBox {
+                    id: micPassthroughCheck
+                    width: parent.width
+                    text: qsTr("Send microphone to host")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.micPassthrough
+                    onCheckedChanged: {
+                        StreamingPreferences.micPassthrough = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Sends your microphone to the host PC as a virtual microphone. Requires a host with microphone support. Press Ctrl+Alt+Shift+U during the stream to mute or unmute.")
+                }
+
+                Label {
+                    width: parent.width
+                    id: micDeviceTitle
+                    text: qsTr("Microphone")
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                    enabled: micPassthroughCheck.checked
+                }
+
+                AutoResizingComboBox {
+                    id: micDeviceComboBox
+                    textRole: "text"
+                    enabled: micPassthroughCheck.checked
+                    model: ListModel {
+                        id: micDeviceListModel
+                    }
+
+                    Component.onCompleted: {
+                        var saved = StreamingPreferences.micDevice
+                        var devices = SystemProperties.getAudioInputDevices()
+
+                        micDeviceListModel.append({ text: qsTr("System default"), val: "" })
+                        var found = (saved === "")
+                        for (var i = 0; i < devices.length; i++) {
+                            micDeviceListModel.append({ text: devices[i], val: devices[i] })
+                            if (devices[i] === saved) {
+                                found = true
+                            }
+                        }
+                        if (!found) {
+                            // Keep the saved choice visible even though it is not connected
+                            micDeviceListModel.append({ text: qsTr("%1 (not connected)").arg(saved), val: saved })
+                        }
+
+                        currentIndex = 0
+                        for (var j = 0; j < micDeviceListModel.count; j++) {
+                            if (micDeviceListModel.get(j).val === saved) {
+                                currentIndex = j
+                                break
+                            }
+                        }
+                    }
+
+                    // ::onActivated must be used, as it only listens for when the index is changed by a human
+                    onActivated : {
+                        StreamingPreferences.micDevice = micDeviceListModel.get(currentIndex).val
+                    }
+                }
+
+
+                CheckBox {
                     id: audioPcCheck
                     width: parent.width
                     text: qsTr("Mute host PC speakers while streaming")

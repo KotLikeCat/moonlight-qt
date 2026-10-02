@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include <QMutex>
 #include <QQuickWindow>
 
 #include <Limelight.h>
@@ -91,6 +92,7 @@ public:
 
 #ifdef Q_OS_DARWIN
 class ClipboardSync;
+class MicStreamer;
 #endif
 
 class Session : public QObject
@@ -156,6 +158,9 @@ private:
 
     void emitLaunchWarning(QString text);
 
+    void startMicStreamer();
+    void stopMicStreamer();
+
     bool populateDecoderProperties(SDL_Window* window);
 
     IAudioRenderer* createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig);
@@ -170,6 +175,9 @@ private:
                              int& width, int& height);
 
     void toggleFullscreen();
+
+    // Ctrl+Alt+Shift+U; no-op when microphone passthrough is not active
+    void toggleMicMute();
 
     void notifyMouseEmulationMode(bool enabled);
 
@@ -260,6 +268,8 @@ private:
 #ifdef Q_OS_DARWIN
     ClipboardSync* m_ClipboardSync = nullptr;
 #endif
+    MicStreamer* m_MicStreamer = nullptr;
+    QMutex m_MicLock; // guards m_MicStreamer (created/destroyed/toggled on different threads)
     NvApp m_App;
     SDL_Window* m_Window;
     IVideoDecoder* m_VideoDecoder;

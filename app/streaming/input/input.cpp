@@ -360,6 +360,11 @@ void SdlInputHandler::setCaptureActive(bool active)
     if (active) {
         // If we're in relative mode, try to activate SDL's relative mouse mode
         if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
+            if (!m_AbsoluteMouseMode) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Mouse capture: SDL_SetRelativeMouseMode(SDL_TRUE) failed, falling back to hidden cursor: %s",
+                            SDL_GetError());
+            }
             // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
             SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
             m_FakeMouseCaptureActive = true;

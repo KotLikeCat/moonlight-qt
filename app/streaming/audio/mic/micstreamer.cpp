@@ -208,9 +208,16 @@ void MicStreamer::setMuted(bool muted)
         m_Sending = false;
         closeDevice();
     }
-    else if (!openDevice()) {
-        // Could not reopen: stay muted so the next toggle retries
-        m_Muted = true;
+    else {
+        // The device is closed here so nothing is encoding; drop stale
+        // predictor state from before the mute
+        if (m_Encoder != nullptr) {
+            opus_encoder_ctl(m_Encoder, OPUS_RESET_STATE);
+        }
+        if (!openDevice()) {
+            // Could not reopen: stay muted so the next toggle retries
+            m_Muted = true;
+        }
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

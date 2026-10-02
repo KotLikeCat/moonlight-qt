@@ -993,7 +993,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Sends your microphone to the host PC as a virtual microphone. Requires a host with microphone support. Press Ctrl+Alt+Shift+U during the stream to mute or unmute.")
+                    ToolTip.text: qsTr("Sends your microphone to the host PC as a virtual microphone. Requires a host with microphone support. Press %1 during the stream to mute or unmute. When your audio output is a Bluetooth headset, choose the built-in microphone to keep stereo sound quality.").arg(Qt.platform.os === "osx" ? "Control+Option+Shift+U" : "Ctrl+Alt+Shift+U")
                 }
 
                 Label {
@@ -1009,6 +1009,11 @@ Flickable {
                     id: micDeviceComboBox
                     textRole: "text"
                     enabled: micPassthroughCheck.checked
+                    hoverEnabled: true
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 8000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("When your audio output is a Bluetooth headset, choose the built-in microphone to keep stereo sound quality.")
                     model: ListModel {
                         id: micDeviceListModel
                     }

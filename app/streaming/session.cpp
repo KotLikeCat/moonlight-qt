@@ -1215,7 +1215,8 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     }
 
     // Warn once per session if the chosen microphone is not connected
-    if (m_Preferences->micPassthrough && !m_Preferences->micDevice.isEmpty() &&
+    if (m_Preferences->micPassthrough && m_Computer->microphoneSupported &&
+            !m_Preferences->micDevice.isEmpty() &&
             !MicStreamer::isToneModeRequested()) {
         if (AudioDevice::resolve(MicStreamer::captureDeviceNames(), m_Preferences->micDevice).isEmpty()) {
             emitLaunchWarning(tr("Microphone \"%1\" is not connected. Using the system default microphone.")

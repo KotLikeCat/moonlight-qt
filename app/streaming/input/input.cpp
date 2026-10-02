@@ -481,6 +481,8 @@ void SdlInputHandler::setCaptureActive(bool active)
 
     // Now update the keyboard grab
     updateKeyboardGrabState();
+
+    logCaptureState(active ? "setCaptureActive(1)" : "setCaptureActive(0)", false);
 }
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)

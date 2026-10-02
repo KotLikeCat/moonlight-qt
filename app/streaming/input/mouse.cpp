@@ -48,6 +48,14 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         return;
     }
     else if (!isCaptureActive()) {
+        {
+            int winW, winH;
+            SDL_GetWindowSize(m_Window, &winW, &winH);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Mouse capture: click while released: button=%d state=%d at (%d,%d) window=%dx%d in_video=%d",
+                        event->button, event->state, event->x, event->y, winW, winH,
+                        isMouseInVideoRegion(event->x, event->y) ? 1 : 0);
+        }
         if (event->button == SDL_BUTTON_LEFT && event->state == SDL_RELEASED &&
                 isMouseInVideoRegion(event->x, event->y)) {
             // Capture the mouse again if clicked when unbound.

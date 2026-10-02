@@ -1,10 +1,16 @@
 #include "sdl.h"
 
+#include "../audiodevice.h"
+
+#include <QStringList>
+
 #include <Limelight.h>
 
-SdlAudioRenderer::SdlAudioRenderer()
+SdlAudioRenderer::SdlAudioRenderer(QString preferredDevice)
     : m_AudioDevice(0),
-      m_AudioBuffer(nullptr)
+      m_AudioBuffer(nullptr),
+      m_PreferredDevice(preferredDevice),
+      m_PreferredDeviceMissing(false)
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
@@ -37,7 +43,43 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                   opusConfig->channelCount *
                   getAudioBufferSampleSize();
 
-    m_AudioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    // Resolve the user's preferred output device (empty = system default)
+    QByteArray deviceName;
+    if (!m_PreferredDevice.isEmpty()) {
+        QStringList available;
+        for (int i = 0; i < SDL_GetNumAudioDevices(0); i++) {
+            const char* name = SDL_GetAudioDeviceName(i, 0);
+            if (name != nullptr) {
+                available.append(QString::fromUtf8(name));
+            }
+        }
+
+        QString resolved = AudioDevice::resolve(available, m_PreferredDevice);
+        if (resolved.isEmpty()) {
+            m_PreferredDeviceMissing = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Preferred audio device \"%s\" is not connected, using system default",
+                        m_PreferredDevice.toUtf8().constData());
+        }
+        else {
+            deviceName = resolved.toUtf8();
+        }
+    }
+
+    m_AudioDevice = 0;
+    if (!deviceName.isEmpty()) {
+        m_AudioDevice = SDL_OpenAudioDevice(deviceName.constData(), 0, &want, &have, 0);
+        if (m_AudioDevice == 0) {
+            m_PreferredDeviceMissing = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to open preferred audio device \"%s\": %s. Retrying with system default",
+                        deviceName.constData(),
+                        SDL_GetError());
+        }
+    }
+    if (m_AudioDevice == 0) {
+        m_AudioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    }
     if (m_AudioDevice == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to open audio device: %s",

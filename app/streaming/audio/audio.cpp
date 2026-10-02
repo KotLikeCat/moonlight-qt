@@ -17,12 +17,23 @@
     delete __renderer;                                 \
 }
 
+// SDL renderer takes the user's preferred output device
+#define TRY_INIT_SDL_RENDERER(opusConfig, preferredDevice)          \
+{                                                                   \
+    IAudioRenderer* __renderer = new SdlAudioRenderer(preferredDevice); \
+    if (__renderer->prepareForPlayback(opusConfig))                 \
+        return __renderer;                                          \
+    delete __renderer;                                              \
+}
+
 IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig)
 {
+    const QString preferredDevice = m_Preferences->audioOutputDevice;
+
     // Handle explicit ML_AUDIO setting and fail if the requested backend fails
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
-        TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
+        TRY_INIT_SDL_RENDERER(opusConfig, preferredDevice)
         return nullptr;
     }
 #if defined(HAVE_SLAUDIO)
@@ -46,7 +57,7 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
 #endif
 
     // Default to SDL
-    TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
+    TRY_INIT_SDL_RENDERER(opusConfig, preferredDevice)
 
     return nullptr;
 }
@@ -122,6 +133,15 @@ bool Session::testAudio(int audioConfiguration)
     IAudioRenderer* audioRenderer = createAudioRenderer(&opusConfig);
     if (audioRenderer == nullptr) {
         return false;
+    }
+
+    // Warn once per session (from the pre-stream validation path only, so we
+    // never touch the launch warning list from the audio thread)
+    SdlAudioRenderer* sdlRenderer = dynamic_cast<SdlAudioRenderer*>(audioRenderer);
+    if (sdlRenderer != nullptr && sdlRenderer->preferredDeviceMissing() && !m_AudioDeviceWarningShown) {
+        m_AudioDeviceWarningShown = true;
+        emitLaunchWarning(tr("Audio device \"%1\" is not connected. Using the system default.")
+                          .arg(m_Preferences->audioOutputDevice));
     }
 
     delete audioRenderer;

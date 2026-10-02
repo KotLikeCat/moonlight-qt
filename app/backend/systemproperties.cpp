@@ -157,6 +157,32 @@ QRect SystemProperties::getSafeAreaResolution(int displayIndex)
     return monitorSafeAreaResolutions.value(displayIndex);
 }
 
+QStringList SystemProperties::getAudioOutputDevices()
+{
+    QStringList devices;
+
+    // Init/Quit must stay paired: the SDL audio renderer asserts that the
+    // audio subsystem is not initialized when a stream starts.
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: %s",
+                     SDL_GetError());
+        return devices;
+    }
+
+    int count = SDL_GetNumAudioDevices(0);
+    for (int i = 0; i < count; i++) {
+        const char* name = SDL_GetAudioDeviceName(i, 0);
+        if (name != nullptr) {
+            devices.append(QString::fromUtf8(name));
+        }
+    }
+
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+
+    return devices;
+}
+
 int SystemProperties::getRefreshRate(int displayIndex)
 {
     // Returns 0 if out of bounds

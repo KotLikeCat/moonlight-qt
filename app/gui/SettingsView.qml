@@ -932,6 +932,53 @@ Flickable {
                     }
                 }
 
+                Label {
+                    width: parent.width
+                    id: audioDeviceTitle
+                    text: qsTr("Audio output device")
+                    font.pointSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                AutoResizingComboBox {
+                    id: audioDeviceComboBox
+                    textRole: "text"
+                    model: ListModel {
+                        id: audioDeviceListModel
+                    }
+
+                    Component.onCompleted: {
+                        var saved = StreamingPreferences.audioOutputDevice
+                        var devices = SystemProperties.getAudioOutputDevices()
+
+                        audioDeviceListModel.append({ text: qsTr("System default"), val: "" })
+                        var found = (saved === "")
+                        for (var i = 0; i < devices.length; i++) {
+                            audioDeviceListModel.append({ text: devices[i], val: devices[i] })
+                            if (devices[i] === saved) {
+                                found = true
+                            }
+                        }
+                        if (!found) {
+                            // Keep the saved choice visible even though it is not connected
+                            audioDeviceListModel.append({ text: qsTr("%1 (not connected)").arg(saved), val: saved })
+                        }
+
+                        currentIndex = 0
+                        for (var j = 0; j < audioDeviceListModel.count; j++) {
+                            if (audioDeviceListModel.get(j).val === saved) {
+                                currentIndex = j
+                                break
+                            }
+                        }
+                    }
+
+                    // ::onActivated must be used, as it only listens for when the index is changed by a human
+                    onActivated : {
+                        StreamingPreferences.audioOutputDevice = audioDeviceListModel.get(currentIndex).val
+                    }
+                }
+
 
                 CheckBox {
                     id: audioPcCheck

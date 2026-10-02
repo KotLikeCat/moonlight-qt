@@ -108,18 +108,18 @@ void SdlInputHandler::verifyRelativeMouseApplied()
         return;
     }
 
-    Uint32 now = SDL_GetTicks();
-    if (now - m_LastRelativeCheckTicks < 200) {
-        return;
-    }
-    m_LastRelativeCheckTicks = now;
-
     int gx, gy, wx, wy, ww, wh;
     SDL_GetGlobalMouseState(&gx, &gy);
     SDL_GetWindowPosition(m_Window, &wx, &wy);
     SDL_GetWindowSize(m_Window, &ww, &wh);
 
     if (gx < wx || gy < wy || gx >= wx + ww || gy >= wy + wh) {
+        Uint32 now = SDL_GetTicks();
+        if (now - m_LastRelativeCheckTicks < 100) {
+            return;
+        }
+        m_LastRelativeCheckTicks = now;
+
 #ifdef Q_OS_DARWIN
         // SDL3's Cocoa backend silently defers relative mode (and warps) while it believes the
         // window is moving or a focus click is pending, and that state can get stuck after
@@ -131,6 +131,9 @@ void SdlInputHandler::verifyRelativeMouseApplied()
                     gx, gy);
         CGWarpMouseCursorPosition(CGPointMake(wx + ww / 2.0, wy + wh / 2.0));
         CGAssociateMouseAndMouseCursorPosition(false);
+
+        // The next motion event's delta includes the warp distance; don't send it to the host
+        m_DropNextRelativeMotion = true;
 #else
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Relative mouse mode not applied by the OS (cursor at %d,%d outside window); re-applying",
@@ -153,7 +156,6 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
         return;
     }
 
-    verifyRelativeMouseApplied();
 
     // Batch all pending mouse motion events to save CPU time
     Sint32 x = event->x, y = event->y, xrel = event->xrel, yrel = event->yrel;
@@ -228,7 +230,15 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
         m_MouseWasInVideoRegion = mouseInVideoRegion;
     }
     else {
-        LiSendMouseMoveEvent(xrel, yrel);
+        if (m_DropNextRelativeMotion) {
+            m_DropNextRelativeMotion = false;
+        }
+        else {
+            LiSendMouseMoveEvent(xrel, yrel);
+        }
+
+        // Check after sending so a forced warp drops the following (warp-polluted) batch
+        verifyRelativeMouseApplied();
     }
 }
 

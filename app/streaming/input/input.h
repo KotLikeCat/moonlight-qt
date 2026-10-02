@@ -208,6 +208,7 @@ private:
 
     SDL_Window* m_Window;
     Uint32 m_LastRelativeCheckTicks = 0;
+    bool m_DropNextRelativeMotion = false;
     bool m_MultiController;
     bool m_GamepadMouse;
     bool m_SwapMouseButtons;

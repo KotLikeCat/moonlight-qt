@@ -9,6 +9,10 @@
 #include <QDir>
 #include <QGuiApplication>
 
+#ifdef Q_OS_DARWIN
+#include <CoreGraphics/CoreGraphics.h>
+#endif
+
 SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, int streamHeight)
     : m_MultiController(prefs.multiController),
       m_GamepadMouse(prefs.gamepadMouse),
@@ -369,6 +373,21 @@ void SdlInputHandler::setCaptureActive(bool active)
             SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
             m_FakeMouseCaptureActive = true;
         }
+
+#ifdef Q_OS_DARWIN
+        // SDL3's Cocoa backend may defer the OS-level part of relative mode (see
+        // verifyRelativeMouseApplied). When the cursor is already inside our window
+        // (e.g. the user just clicked into it), confine it right away so it can't escape.
+        if (!m_AbsoluteMouseMode && SDL_GetRelativeMouseMode()) {
+            int gx, gy, wx, wy, ww, wh;
+            SDL_GetGlobalMouseState(&gx, &gy);
+            SDL_GetWindowPosition(m_Window, &wx, &wy);
+            SDL_GetWindowSize(m_Window, &ww, &wh);
+            if (gx >= wx && gy >= wy && gx < wx + ww && gy < wy + wh) {
+                CGAssociateMouseAndMouseCursorPosition(false);
+            }
+        }
+#endif
 
         // Synchronize the client and host cursor when activating absolute capture
         if (m_AbsoluteMouseMode) {

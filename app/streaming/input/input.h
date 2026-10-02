@@ -152,9 +152,6 @@ public:
 
     void updatePointerRegionLock();
 
-    // Called on the main thread when the deferred re-assert timer event arrives
-    void handleDeferredCaptureReassert();
-
     static
     QString getUnmappedGamepads();
 
@@ -207,14 +204,7 @@ private:
     static
     Uint32 dragTimerCallback(Uint32 interval, void* param);
 
-    void reassertCapture(const char* reason);
-    void logCaptureState(const char* event, bool reasserted);
-    static Uint32 reassertTimerCallback(Uint32 interval, void* param);
-
     SDL_Window* m_Window;
-    SDL_TimerID m_ReassertTimer = 0;
-    Uint32 m_LastReassertTicks = 0;
-    bool m_HasReasserted = false;
     bool m_MultiController;
     bool m_GamepadMouse;
     bool m_SwapMouseButtons;

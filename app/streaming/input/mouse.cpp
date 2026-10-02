@@ -6,19 +6,6 @@
 
 void SdlInputHandler::notifyMouseLeave()
 {
-    bool reasserted = false;
-    if (m_Window != nullptr && SDL_GetRelativeMouseMode() &&
-            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) {
-        // In working relative mode the cursor can't leave the window, so this
-        // means the OS-level capture was lost.
-        Uint32 now = SDL_GetTicks();
-        if (!m_HasReasserted || now - m_LastReassertTicks >= 250) {
-            reassertCapture("cursor left window while captured");
-            reasserted = true;
-        }
-    }
-    logCaptureState("LEAVE", reasserted);
-
     if (m_NeedsManualCaptureOnLeave) {
         // SDL on Windows doesn't send the mouse button up until the mouse re-enters the window
         // after leaving it. This breaks some of the Aero snap gestures, so we'll capture it to

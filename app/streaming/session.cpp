@@ -33,7 +33,6 @@
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
-#define SDL_CODE_REASSERT_MOUSE_CAPTURE 106
 
 #include <openssl/rand.h>
 
@@ -2109,11 +2108,6 @@ void Session::exec()
                 break;
             case SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER:
                 m_FlushingWindowEventsRef--;
-                break;
-            case SDL_CODE_REASSERT_MOUSE_CAPTURE:
-                if (m_InputHandler != nullptr) {
-                    m_InputHandler->handleDeferredCaptureReassert();
-                }
                 break;
             case SDL_CODE_GAMECONTROLLER_RUMBLE:
                 m_InputHandler->rumble((uint16_t)(uintptr_t)event.user.data1,

@@ -6,9 +6,9 @@
 #include <Limelight.h>
 #ifdef Q_OS_DARWIN
 #include "streaming/clipboard/clipboardsync.h"
+#endif
 #include "streaming/audio/mic/micstreamer.h"
 #include "streaming/audio/audiodevice.h"
-#endif
 #include "SDL_compat.h"
 #include "utils.h"
 

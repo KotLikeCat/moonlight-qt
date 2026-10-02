@@ -92,8 +92,8 @@ public:
 
 #ifdef Q_OS_DARWIN
 class ClipboardSync;
-class MicStreamer;
 #endif
+class MicStreamer;
 
 class Session : public QObject
 {

@@ -177,17 +177,26 @@ bool MicStreamer::openDevice()
 
 void MicStreamer::closeDevice()
 {
-    if (m_Device != 0) {
+    SDL_AudioDeviceID dev = m_Device.load();
+    if (dev != 0) {
         // SDL_CloseAudioDevice waits for an in-flight callback to finish
-        SDL_PauseAudioDevice(m_Device, 1);
-        SDL_CloseAudioDevice(m_Device);
+        SDL_PauseAudioDevice(dev, 1);
+        SDL_CloseAudioDevice(dev);
         m_Device = 0;
     }
 }
 
 void MicStreamer::setMuted(bool muted)
 {
-    if (muted == m_Muted || m_Stopped) {
+    if (m_Stopped) {
+        if (!m_StoppedLogged) {
+            m_StoppedLogged = true;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Microphone: the host does not accept microphone audio, mute toggle ignored");
+        }
+        return;
+    }
+    if (muted == m_Muted.load()) {
         return;
     }
     m_Muted = muted;
@@ -255,8 +264,9 @@ void MicStreamer::encodeAndSend(const float* frame)
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Microphone: host does not support microphone passthrough, stopping for this session");
             m_Sending = false;
-            if (m_Device != 0) {
-                SDL_PauseAudioDevice(m_Device, 1);
+            SDL_AudioDeviceID dev = m_Device.load();
+            if (dev != 0) {
+                SDL_PauseAudioDevice(dev, 1);
             }
         }
     }

@@ -128,7 +128,6 @@ SdlAudioRenderer::~SdlAudioRenderer()
     }
 
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 }
 
 void* SdlAudioRenderer::getAudioBuffer(int*)

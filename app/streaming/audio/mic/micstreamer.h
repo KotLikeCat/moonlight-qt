@@ -32,7 +32,7 @@ public:
     // Mute = capture device closed (OS microphone indicator off).
     void setMuted(bool muted);
     void toggleMute();
-    bool isMuted() const { return m_Muted; }
+    bool isMuted() const { return m_Muted.load(); }
 
     // True once the host reported it does not support the microphone stream
     bool hasStopped() const { return m_Stopped.load(); }
@@ -59,12 +59,13 @@ private:
     bool m_ToneMode;
 
     bool m_AudioInitialized;
-    SDL_AudioDeviceID m_Device;
+    std::atomic<SDL_AudioDeviceID> m_Device;
     SDL_Thread* m_ToneThread;
     std::atomic<bool> m_ToneThreadRun;
     std::atomic<bool> m_Sending;   // false while muted or stopped
     std::atomic<bool> m_Stopped;
-    bool m_Muted;
+    std::atomic<bool> m_Muted;
+    bool m_StoppedLogged = false;
 
     OpusEncoder* m_Encoder;
     MicFramer m_Framer;

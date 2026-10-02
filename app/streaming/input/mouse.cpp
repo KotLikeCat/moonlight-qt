@@ -98,6 +98,33 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
                            button);
 }
 
+void SdlInputHandler::verifyRelativeMouseApplied()
+{
+    if (!SDL_GetRelativeMouseMode() || !(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) {
+        return;
+    }
+
+    Uint32 now = SDL_GetTicks();
+    if (now - m_LastRelativeCheckTicks < 200) {
+        return;
+    }
+    m_LastRelativeCheckTicks = now;
+
+    int gx, gy, wx, wy, ww, wh;
+    SDL_GetGlobalMouseState(&gx, &gy);
+    SDL_GetWindowPosition(m_Window, &wx, &wy);
+    SDL_GetWindowSize(m_Window, &ww, &wh);
+
+    if (gx < wx || gy < wy || gx >= wx + ww || gy >= wy + wh) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Relative mouse mode not applied by the OS (cursor at %d,%d outside window); re-applying",
+                    gx, gy);
+        SDL_SetRelativeMouseMode(SDL_FALSE);
+        SDL_SetRelativeMouseMode(SDL_TRUE);
+        SDL_WarpMouseInWindow(m_Window, ww / 2, wh / 2);
+    }
+}
+
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 {
     if (!isCaptureActive()) {
@@ -108,6 +135,8 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+
+    verifyRelativeMouseApplied();
 
     // Batch all pending mouse motion events to save CPU time
     Sint32 x = event->x, y = event->y, xrel = event->xrel, yrel = event->yrel;

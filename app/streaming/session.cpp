@@ -33,6 +33,7 @@
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
+#define SDL_CODE_CHECK_FULLSCREEN_GEOMETRY 106
 
 #include <openssl/rand.h>
 
@@ -1875,6 +1876,84 @@ void Session::interrupt()
     SDL_PushEvent(&event);
 }
 
+Uint32 Session::fullscreenGeometryTimerCallback(Uint32, void*)
+{
+    // Timer thread: only push an event, never touch SDL window APIs here
+    SDL_Event event;
+    event.type = SDL_USEREVENT;
+    event.user.code = SDL_CODE_CHECK_FULLSCREEN_GEOMETRY;
+    event.user.data1 = nullptr;
+    event.user.data2 = nullptr;
+    SDL_PushEvent(&event);
+    return 0; // one-shot
+}
+
+void Session::scheduleFullscreenGeometryCheck()
+{
+    if (m_Window == nullptr || m_FsGeometryTimer != 0) {
+        return;
+    }
+    if (!(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN)) {
+        return;
+    }
+    m_FsGeometryTimer = SDL_AddTimer(300, fullscreenGeometryTimerCallback, this);
+}
+
+void Session::checkFullscreenGeometry()
+{
+    // The timer has fired (one-shot), so it's no longer pending
+    m_FsGeometryTimer = 0;
+
+    Uint32 flags = SDL_GetWindowFlags(m_Window);
+    if (!(flags & SDL_WINDOW_FULLSCREEN)) {
+        return;
+    }
+
+    int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+    SDL_Rect bounds;
+    if (displayIndex < 0 || SDL_GetDisplayBounds(displayIndex, &bounds) != 0) {
+        return;
+    }
+
+    int x, y, w, h;
+    SDL_GetWindowPosition(m_Window, &x, &y);
+    SDL_GetWindowSize(m_Window, &w, &h);
+
+    if (x == bounds.x && y == bounds.y && w == bounds.w && h == bounds.h) {
+        m_FsGeometryAttempts = 0;
+        return;
+    }
+
+    if (m_FsGeometryAttempts >= 2) {
+        // Already tried everything for this focus gain
+        return;
+    }
+    m_FsGeometryAttempts++;
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Fullscreen window displaced to (%d,%d %dx%d), display (%d,%d %dx%d); restoring",
+                x, y, w, h, bounds.x, bounds.y, bounds.w, bounds.h);
+
+    if (m_FsGeometryAttempts == 1) {
+        SDL_SetWindowPosition(m_Window, bounds.x, bounds.y);
+        if (w != bounds.w || h != bounds.h) {
+            SDL_SetWindowSize(m_Window, bounds.w, bounds.h);
+        }
+    }
+    else {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Fullscreen geometry still wrong; re-applying fullscreen (flags 0x%x)",
+                    flags & SDL_WINDOW_FULLSCREEN_DESKTOP);
+        Uint32 fsFlags = flags & SDL_WINDOW_FULLSCREEN_DESKTOP;
+        SDL_SetWindowFullscreen(m_Window, 0);
+        SDL_SetWindowFullscreen(m_Window, fsFlags);
+    }
+
+    if (m_FsGeometryAttempts < 2) {
+        scheduleFullscreenGeometryCheck();
+    }
+}
+
 void Session::exec()
 {
     // If the connection failed, clean up and abort the connection.
@@ -2134,6 +2213,9 @@ void Session::exec()
                 m_InputHandler->setAdaptiveTriggers((uint16_t)(uintptr_t)event.user.data1,
                                                     (DualSenseOutputReport *)event.user.data2);
                 break;
+            case SDL_CODE_CHECK_FULLSCREEN_GEOMETRY:
+                checkFullscreenGeometry();
+                break;
             default:
                 SDL_assert(false);
             }
@@ -2157,12 +2239,17 @@ void Session::exec()
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
+                m_FsGeometryAttempts = 0;
+                scheduleFullscreenGeometryCheck();
                 m_InputHandler->notifyFocusGained();
 #ifdef Q_OS_DARWIN
                 if (m_ClipboardSync != nullptr) {
                     m_ClipboardSync->notifyFocusGained();
                 }
 #endif
+                break;
+            case SDL_WINDOWEVENT_MOVED:
+                scheduleFullscreenGeometryCheck();
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();
@@ -2468,6 +2555,11 @@ DispatchDeferredCleanup:
             m_QtWindow->setWindowState(Qt::WindowNoState);
         }
 #endif
+    }
+
+    if (m_FsGeometryTimer != 0) {
+        SDL_RemoveTimer(m_FsGeometryTimer);
+        m_FsGeometryTimer = 0;
     }
 
     // This must be called after the decoder is deleted, because

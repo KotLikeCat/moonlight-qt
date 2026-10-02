@@ -272,6 +272,11 @@ private:
     QMutex m_MicLock; // guards m_MicStreamer (created/destroyed/toggled on different threads)
     NvApp m_App;
     SDL_Window* m_Window;
+    SDL_TimerID m_FsGeometryTimer = 0;
+    int m_FsGeometryAttempts = 0;
+    static Uint32 fullscreenGeometryTimerCallback(Uint32 interval, void* param);
+    void scheduleFullscreenGeometryCheck();
+    void checkFullscreenGeometry();
     IVideoDecoder* m_VideoDecoder;
     SDL_mutex* m_DecoderLock;
     bool m_AudioDisabled;

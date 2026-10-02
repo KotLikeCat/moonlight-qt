@@ -140,6 +140,8 @@ public:
 
     void notifyFocusGained();
 
+    void verifyRelativeMouseApplied();
+
     bool isCaptureActive();
 
     bool isSystemKeyCaptureActive();
@@ -205,6 +207,7 @@ private:
     Uint32 dragTimerCallback(Uint32 interval, void* param);
 
     SDL_Window* m_Window;
+    Uint32 m_LastRelativeCheckTicks = 0;
     bool m_MultiController;
     bool m_GamepadMouse;
     bool m_SwapMouseButtons;

@@ -4,9 +4,12 @@
 #include <QFileInfo>
 #include <QThread>
 
-FileServer::FileServer(NvComputer* computer, int workers)
-    : m_Computer(computer),
-      m_WorkerCount(workers < 1 ? 1 : workers)
+namespace {
+constexpr quint32 kMaxRangeBytes = 4u * 1024 * 1024;
+}
+
+FileServer::FileServer(int workers)
+    : m_WorkerCount(workers < 1 ? 1 : workers)
 {
 }
 
@@ -119,6 +122,10 @@ void FileServer::workerMain()
 FileServer::Reply FileServer::readRange(const QVector<ClipboardFiles::Entry>& entries, quint32 fileIndex, quint64 offset, quint32 length)
 {
     Reply reply;
+    if (length == 0 || length > kMaxRangeBytes) {
+        reply.error = "io";
+        return reply;
+    }
     if (fileIndex >= quint32(entries.size()) || entries[int(fileIndex)].isDir) {
         reply.error = "io";
         return reply;

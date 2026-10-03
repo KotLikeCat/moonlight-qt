@@ -13,7 +13,6 @@
 
 #include "manifestbuilder.h"
 
-class NvComputer;
 class QThread;
 
 // Serves the host's range requests for the currently offered clipboard files.
@@ -39,7 +38,7 @@ public:
     // Called once on each worker thread; the returned sender is used (and destroyed) on that thread.
     using SenderFactory = std::function<Sender()>;
 
-    explicit FileServer(NvComputer* computer, int workers = 4);
+    explicit FileServer(int workers = 4);
     ~FileServer();
 
     void setSenderFactory(SenderFactory factory);
@@ -55,7 +54,6 @@ private:
     void workerMain();
     void startWorkersLocked();
 
-    NvComputer* m_Computer;
     int m_WorkerCount;
     std::mutex m_Mutex;
     std::condition_variable m_Cond;

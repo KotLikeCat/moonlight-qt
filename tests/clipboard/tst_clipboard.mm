@@ -58,6 +58,7 @@ private slots:
     void changedFileReportsChanged();
     void directoryIndexIsIo();
     void staleOfferReportsGone();
+    void rangeLengthIsClamped();
     void pasteboardFileUrls();
 };
 
@@ -582,7 +583,7 @@ void ClipboardTests::staleOfferReportsGone()
     QVector<QPair<quint32, FileServer::Reply>> got;
     QSemaphore sem;
     {
-        FileServer server(nullptr, 2);
+        FileServer server(2);
         server.setSenderForTests([&](const FileServer::Job& job, const FileServer::Reply& reply) {
             QMutexLocker l(&mutex);
             got.append({job.requestId, reply});
@@ -604,6 +605,15 @@ void ClipboardTests::staleOfferReportsGone()
     QCOMPARE(byReq[2].body, QByteArray("234"));
     QVERIFY(byReq[2].error.isEmpty());
     QCOMPARE(byReq[3].error, QByteArray("gone"));
+}
+
+void ClipboardTests::rangeLengthIsClamped()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {makeTempEntry(dir.path(), "0123456789")};
+    QCOMPARE(FileServer::readRange(e, 0, 0, 0).error, QByteArray("io"));
+    QCOMPARE(FileServer::readRange(e, 0, 0, 4u * 1024 * 1024 + 1).error, QByteArray("io"));
+    QVERIFY(FileServer::readRange(e, 0, 0, 4u * 1024 * 1024).error.isEmpty());
 }
 
 void ClipboardTests::pasteboardFileUrls()

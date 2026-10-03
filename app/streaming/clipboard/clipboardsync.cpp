@@ -9,6 +9,7 @@
 #include "backend/nvhttp.h"
 
 #include <QCoreApplication>
+#include <QReadLocker>
 #include <QThread>
 #include <QTimer>
 #include <QtDebug>
@@ -36,9 +37,21 @@ ClipboardSync::ClipboardSync(NvComputer* computer)
 {
     // Created here, before the pointer is published to the callback thread. Each file
     // worker thread owns its own NvHTTP (created and destroyed on that thread).
-    m_FileServer = new FileServer(computer, 4);
-    m_FileServer->setSenderFactory([computer]() -> FileServer::Sender {
-        auto http = std::make_shared<NvHTTP>(computer);
+    // Snapshot the connection parameters under the computer's lock; worker threads never touch NvComputer.
+    NvAddress address;
+    uint16_t httpsPort;
+    QSslCertificate serverCert;
+    bool useTrueUid;
+    {
+        QReadLocker locker(&computer->lock);
+        address = computer->activeAddress;
+        httpsPort = computer->activeHttpsPort;
+        serverCert = computer->serverCert;
+        useTrueUid = !computer->isNvidiaServerSoftware;
+    }
+    m_FileServer = new FileServer(4);
+    m_FileServer->setSenderFactory([address, httpsPort, serverCert, useTrueUid]() -> FileServer::Sender {
+        auto http = std::make_shared<NvHTTP>(address, httpsPort, serverCert, useTrueUid);
         return [http](const FileServer::Job& job, const FileServer::Reply& reply) {
             const int status = http->postClipboardFileChunk(job.offerId.toHex(), job.requestId, job.fileIndex,
                                                             job.offset, reply.body, reply.error, kFilePostTimeoutMs);

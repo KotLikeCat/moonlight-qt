@@ -8,6 +8,7 @@
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 
+#include <memory>
 #include <QCoreApplication>
 #include <QWriteLocker>
 #include <QReadLocker>
@@ -56,11 +57,34 @@ ClipboardSync::ClipboardSync(NvComputer* computer)
     m_FileServer->setSenderFactory([address, httpsPort, serverCert, useTrueUid]() -> FileServer::Sender {
         // One persistent NvHTTP (and QNetworkAccessManager) per worker, with keep-alive enabled, so a paste
         // reuses at most one TLS connection per worker instead of reconnecting for every chunk.
-        auto http = std::make_shared<NvHTTP>(address, httpsPort, serverCert, useTrueUid);
-        http->setKeepAlive(true);
-        return [http](const FileServer::Job& job, const FileServer::Reply& reply) {
-            const int status = http->postClipboardFileChunk(job.offerId.toHex(), job.requestId, job.fileIndex,
-                                                            job.offset, reply.body, reply.error, kFilePostTimeoutMs);
+        struct State {
+            std::unique_ptr<NvHTTP> http;
+            std::chrono::steady_clock::time_point lastFinished;
+        };
+        auto make = [address, httpsPort, serverCert, useTrueUid]() {
+            auto h = std::make_unique<NvHTTP>(address, httpsPort, serverCert, useTrueUid);
+            h->setKeepAlive(true);
+            return h;
+        };
+        auto state = std::make_shared<State>();
+        state->http = make();
+        state->lastFinished = std::chrono::steady_clock::now();
+        return [state, make](const FileServer::Job& job, const FileServer::Reply& reply) {
+            // The host drops idle connections after ~5 s and this worker has no event loop while idle:
+            // start from a fresh connection pool if the last request finished more than 3 s ago.
+            if (std::chrono::steady_clock::now() - state->lastFinished > std::chrono::seconds(3)) {
+                state->http = make();
+            }
+            int status = 0;
+            for (int attempt = 0;; attempt++) {
+                status = state->http->postClipboardFileChunk(job.offerId.toHex(), job.requestId, job.fileIndex,
+                                                             job.offset, reply.body, reply.error, kFilePostTimeoutMs);
+                if (!FileServer::shouldRetryChunkPost(status, attempt)) {
+                    break;
+                }
+                state->http = make();   // drop the possibly stale socket and retry once
+            }
+            state->lastFinished = std::chrono::steady_clock::now();
             if (status != 200 && status != 410) {
                 qWarning() << "Clipboard file chunk POST failed with HTTP status" << status;
             }

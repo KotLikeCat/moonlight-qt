@@ -54,6 +54,7 @@ private slots:
     void renamesDuplicates();
     void backslashNamesAreMapped();
     void hostRejectReasons();
+    void chunkRetryDecision();
     void restoreOfferKeepsPreviousOffer();
     void skipsTopLevelSymlinkKeepsHidden();
     void readsFullAndPartialRanges();
@@ -496,6 +497,15 @@ void ClipboardTests::backslashNamesAreMapped()
     // Mapping happens before collision renaming, so the second a_b.txt gets a suffix.
     QCOMPARE(rels, (QStringList{"a_b.txt", "a_b (2).txt", "dir", "dir/c_d.txt"}));
     QVERIFY(r.entries[0].absolutePath.endsWith("a\\b.txt"));
+}
+
+void ClipboardTests::chunkRetryDecision()
+{
+    QVERIFY(FileServer::shouldRetryChunkPost(0, 0));
+    QVERIFY(!FileServer::shouldRetryChunkPost(0, 1));
+    QVERIFY(!FileServer::shouldRetryChunkPost(200, 0));
+    QVERIFY(!FileServer::shouldRetryChunkPost(410, 0));
+    QVERIFY(!FileServer::shouldRetryChunkPost(500, 0));
 }
 
 void ClipboardTests::hostRejectReasons()

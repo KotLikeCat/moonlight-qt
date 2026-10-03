@@ -1766,17 +1766,25 @@ bool Session::startConnectionAsync()
     if (m_ClipboardSync != nullptr) {
         // Transient "files were not shared" message, shown in the stream window via the status overlay.
         // Called on the clipboard worker thread; cleared by shutdownAsync() before this Session goes away.
-        m_ClipboardSync->setNoticeHandler([this](const QString& text) {
-            if (m_MouseEmulationRefCount > 0) {
-                // Mouse emulation owns the status overlay
-                return;
-            }
+        // Only touches the overlay when it is free or still shows our own text (called under ClipboardSync's mutex).
+        auto ours = std::make_shared<QByteArray>();
+        m_ClipboardSync->setNoticeHandler([this, ours](const QString& text) {
+            const bool enabled = m_OverlayManager.isOverlayEnabled(Overlay::OverlayStatusUpdate);
+            const char* current = m_OverlayManager.getOverlayText(Overlay::OverlayStatusUpdate);
+            const bool isOurs = enabled && !ours->isEmpty() && current != nullptr && *ours == current;
             if (text.isEmpty()) {
-                m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+                if (isOurs) {
+                    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+                }
+                ours->clear();
                 return;
             }
-            const QByteArray utf8 = text.toUtf8();
-            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, utf8.constData());
+            if (m_MouseEmulationRefCount > 0 || (enabled && !isOurs && current != nullptr && *current != '\0')) {
+                qInfo() << "Clipboard notice not shown, the status overlay is in use:" << text;
+                return;
+            }
+            *ours = text.toUtf8();
+            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, ours->constData());
             m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
         });
     }

@@ -56,6 +56,10 @@ public:
     void clearOffer();
     void request(const QByteArray& offerId16, quint32 requestId, quint32 fileIndex, quint64 offset, quint32 length);
 
+    // Retry decision for a chunk POST: only a transport failure (status 0) on the first attempt, e.g. the
+    // host closed an idle keep-alive socket. A duplicate chunk is harmless (the host answers 410).
+    static bool shouldRetryChunkPost(int status, int attempt) { return status == 0 && attempt == 0; }
+
     static Reply readRange(const QVector<ClipboardFiles::Entry>& entries, quint32 fileIndex, quint64 offset, quint32 length);
 
 private:

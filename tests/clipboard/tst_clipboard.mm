@@ -5,6 +5,8 @@
 #include "clipboardbundle.h"
 #include "clipboardsyncstate.h"
 #include "macpasteboard.h"
+#include "manifestbuilder.h"
+#include "filecodec.h"
 
 using namespace ClipboardBundle;
 using Action = ClipboardSyncState::Action;
@@ -39,6 +41,11 @@ private slots:
     void pasteboardDetectsSensitiveData();
     void pasteboardConvertsTiffToPng();
     void pasteboardIgnoresFileOnlyContent();
+    void encodesSharedVectors();
+    void buildsTreePreOrder();
+    void normalizesToNfc();
+    void skipsSymlinksAndDsStore();
+    void enforcesLimits();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -335,6 +342,115 @@ void ClipboardTests::pasteboardIgnoresFileOnlyContent()
     MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.files"));
     QVERIFY(board.read().isEmpty());
     board.releaseForTests();
+}
+
+static QByteArray testOfferId()
+{
+    QByteArray id;
+    for (int i = 0; i < 16; i++) id.append(char(i));
+    return id;
+}
+
+static ClipboardFiles::Entry mk(bool dir, quint64 size, qint64 mtime, const QString& rel)
+{
+    return ClipboardFiles::Entry{dir, size, mtime, rel, QString()};
+}
+
+void ClipboardTests::encodesSharedVectors()
+{
+    QMap<QByteArray, QVector<ClipboardFiles::Entry>> cases;
+    cases["single_file"] = {mk(false, 5, 1700000000000LL, "a.txt")};
+    cases["cyrillic_tree"] = {mk(true, 0, 1700000000000LL, QString::fromUtf8("\xd0\x9f\xd0\xb0\xd0\xbf\xd0\xba\xd0\xb0")),
+                              mk(false, 1048576, 1700000000123LL, QString::fromUtf8("\xd0\x9f\xd0\xb0\xd0\xbf\xd0\xba\xd0\xb0/\xd1\x84\xd0\xb0\xd0\xb9\xd0\xbb \xd0\xb9.txt")),
+                              mk(false, 0, 0, "b.bin")};
+    cases["over_4gib"] = {mk(false, 5000000000ULL, 1, "big.iso")};
+
+    QFile file(QFINDTESTDATA("files_vectors.txt"));
+    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+    int count = 0;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith('#')) continue;
+        const QList<QByteArray> parts = line.split(' ');
+        QCOMPARE(parts.size(), 2);
+        QVERIFY2(cases.contains(parts[0]), parts[0].constData());
+        QCOMPARE(ClipboardFiles::encodeManifest(testOfferId(), cases[parts[0]]).toHex(), parts[1]);
+        count++;
+    }
+    QCOMPARE(count, 3);
+}
+
+void ClipboardTests::buildsTreePreOrder()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    QVERIFY(root.mkpath("top/sub"));
+    QFile a(root.filePath("top/a.txt")); QVERIFY(a.open(QIODevice::WriteOnly)); a.write("hello"); a.close();
+    QFile b(root.filePath("top/sub/b.txt")); QVERIFY(b.open(QIODevice::WriteOnly)); b.close();
+    auto r = ClipboardFiles::buildManifest({root.filePath("top")});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QStringList rels;
+    for (auto& e : r.entries) rels << e.relativePath;
+    QCOMPARE(rels, (QStringList{"top", "top/a.txt", "top/sub", "top/sub/b.txt"}));
+    QVERIFY(r.entries[0].isDir);
+    QVERIFY(!r.entries[1].isDir);
+    QCOMPARE(r.entries[1].size, quint64(5));
+    QVERIFY(r.entries[1].mtimeMs > 0);
+    QVERIFY(r.entries[1].absolutePath.endsWith("top/a.txt"));
+}
+
+void ClipboardTests::normalizesToNfc()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString nfd = QString::fromUtf8("\xd0\xb8\xcc\x86.txt");
+    const QString nfc = QString::fromUtf8("\xd0\xb9.txt");
+    QVERIFY(nfd != nfc);
+    QFile f(tmp.path() + "/" + nfd);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.close();
+    auto r = ClipboardFiles::buildManifest({tmp.path() + "/" + nfd});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QCOMPARE(r.entries.size(), 1);
+    QCOMPARE(r.entries[0].relativePath, nfc);
+}
+
+void ClipboardTests::skipsSymlinksAndDsStore()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    QVERIFY(root.mkpath("top"));
+    QFile a(root.filePath("top/a.txt")); QVERIFY(a.open(QIODevice::WriteOnly)); a.close();
+    QFile d(root.filePath("top/.DS_Store")); QVERIFY(d.open(QIODevice::WriteOnly)); d.close();
+    QVERIFY(QFile::link(root.filePath("top/a.txt"), root.filePath("top/link")));
+    auto r = ClipboardFiles::buildManifest({root.filePath("top")});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QStringList rels;
+    for (auto& e : r.entries) rels << e.relativePath;
+    QCOMPARE(rels, (QStringList{"top", "top/a.txt"}));
+    QVERIFY(r.skipped.size() >= 1);
+}
+
+void ClipboardTests::enforcesLimits()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    QStringList paths;
+    for (const char* n : {"1", "2", "3"}) {
+        QFile f(root.filePath(n)); QVERIFY(f.open(QIODevice::WriteOnly)); f.close();
+        paths << root.filePath(n);
+    }
+    ClipboardFiles::Limits lim;
+    lim.maxEntries = 2;
+    QVERIFY(!ClipboardFiles::buildManifest(paths, lim).error.isEmpty());
+    QVERIFY(ClipboardFiles::buildManifest(paths).error.isEmpty());
+    ClipboardFiles::Limits lim2;
+    lim2.maxComponentUtf16 = 0;
+    QVERIFY(!ClipboardFiles::buildManifest(paths, lim2).error.isEmpty());
+    QCOMPARE(ClipboardFiles::newOfferId().size(), 16);
 }
 
 QTEST_GUILESS_MAIN(ClipboardTests)

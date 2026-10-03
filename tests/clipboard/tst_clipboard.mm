@@ -46,6 +46,8 @@ private slots:
     void normalizesToNfc();
     void skipsSymlinksAndDsStore();
     void enforcesLimits();
+    void renamesDuplicates();
+    void skipsTopLevelSymlinkKeepsHidden();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -451,6 +453,56 @@ void ClipboardTests::enforcesLimits()
     lim2.maxComponentUtf16 = 0;
     QVERIFY(!ClipboardFiles::buildManifest(paths, lim2).error.isEmpty());
     QCOMPARE(ClipboardFiles::newOfferId().size(), 16);
+}
+
+static void touch(const QString& path)
+{
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.close();
+}
+
+void ClipboardTests::renamesDuplicates()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    QVERIFY(root.mkpath("p1/d"));
+    QVERIFY(root.mkpath("p2/d"));
+    QVERIFY(root.mkpath("p3"));
+    touch(root.filePath("p1/x.txt"));
+    touch(root.filePath("p2/x.txt"));
+    touch(root.filePath("p3/X.TXT"));
+    touch(root.filePath("p1/d/c.txt"));
+    touch(root.filePath("p2/d/e.txt"));
+    auto r = ClipboardFiles::buildManifest({root.filePath("p1/x.txt"), root.filePath("p2/x.txt"),
+                                            root.filePath("p3/X.TXT"), root.filePath("p1/d"),
+                                            root.filePath("p2/d/")});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QStringList rels;
+    for (auto& e : r.entries) rels << e.relativePath;
+    QCOMPARE(rels, (QStringList{"x.txt", "x (2).txt", "X (3).TXT", "d", "d/c.txt", "d (2)", "d (2)/e.txt"}));
+    QVERIFY(r.entries[1].absolutePath.endsWith("p2/x.txt"));
+    QVERIFY(r.entries[6].absolutePath.endsWith("p2/d/e.txt"));
+
+    auto r2 = ClipboardFiles::buildManifest({root.filePath("p3/X.TXT"), root.filePath("p1/x.txt")});
+    QCOMPARE(r2.entries[0].relativePath, QString("X.TXT"));
+    QCOMPARE(r2.entries[1].relativePath, QString("x (2).txt"));
+}
+
+void ClipboardTests::skipsTopLevelSymlinkKeepsHidden()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    touch(root.filePath("real.txt"));
+    touch(root.filePath(".hidden"));
+    QVERIFY(QFile::link(root.filePath("real.txt"), root.filePath("lnk")));
+    auto r = ClipboardFiles::buildManifest({root.filePath("lnk"), root.filePath(".hidden")});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QCOMPARE(r.entries.size(), 1);
+    QCOMPARE(r.entries[0].relativePath, QString(".hidden"));
+    QCOMPARE(r.skipped.size(), 1);
 }
 
 QTEST_GUILESS_MAIN(ClipboardTests)

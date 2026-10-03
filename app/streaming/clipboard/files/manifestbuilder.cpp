@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QSet>
 #include <algorithm>
 
 namespace ClipboardFiles {
@@ -18,9 +19,27 @@ struct Walker {
         return false;
     }
 
-    bool add(const QFileInfo &info, const QString &rel)
+    // Makes the name unique within its directory level (case-insensitively), as the host requires.
+    static QString uniqueName(const QString &name, QSet<QString> &seen)
     {
-        const QString name = info.fileName().normalized(QString::NormalizationForm_C);
+        QString candidate = name;
+        const int dot = name.lastIndexOf(QLatin1Char('.'));
+        const QString stem = dot > 0 ? name.left(dot) : name;
+        const QString ext = dot > 0 ? name.mid(dot) : QString();
+        for (int n = 2; seen.contains(candidate.toCaseFolded()); n++) {
+            candidate = stem + QStringLiteral(" (%1)").arg(n) + ext;
+        }
+        seen.insert(candidate.toCaseFolded());
+        return candidate;
+    }
+
+    bool add(const QFileInfo &info, const QString &rel, QSet<QString> &seen)
+    {
+        if (!info.isDir() && info.size() < 0) {
+            result.skipped.append(info.absoluteFilePath());
+            return true;
+        }
+        const QString name = uniqueName(info.fileName().normalized(QString::NormalizationForm_C), seen);
         if (name.size() > limits.maxComponentUtf16) {
             return fail(QStringLiteral("name too long: ") + name);
         }
@@ -43,12 +62,18 @@ struct Walker {
         QDir dir(info.absoluteFilePath());
         QFileInfoList children = dir.entryInfoList(
             QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::NoSort);
-        std::sort(children.begin(), children.end(), [](const QFileInfo &a, const QFileInfo &b) {
-            return a.fileName().normalized(QString::NormalizationForm_C) <
-                   b.fileName().normalized(QString::NormalizationForm_C);
-        });
-        for (const QFileInfo &child : children) {
-            if (!visit(child, path)) {
+        QVector<QPair<QString, QFileInfo>> keyed;
+        keyed.reserve(children.size());
+        for (const QFileInfo &c : children) {
+            keyed.append({c.fileName().normalized(QString::NormalizationForm_C), c});
+        }
+        std::sort(keyed.begin(), keyed.end(),
+                  [](const QPair<QString, QFileInfo> &a, const QPair<QString, QFileInfo> &b) {
+                      return a.first < b.first;
+                  });
+        QSet<QString> childSeen;
+        for (const auto &child : keyed) {
+            if (!visit(child.second, path, childSeen)) {
                 return false;
             }
         }
@@ -56,7 +81,7 @@ struct Walker {
     }
 
     // Returns false only on a fatal (limit) error.
-    bool visit(const QFileInfo &info, const QString &rel)
+    bool visit(const QFileInfo &info, const QString &rel, QSet<QString> &seen)
     {
         if (info.fileName() == QLatin1String(".DS_Store")) {
             return true;
@@ -69,7 +94,7 @@ struct Walker {
             result.skipped.append(info.absoluteFilePath());
             return true;
         }
-        return add(info, rel);
+        return add(info, rel, seen);
     }
 };
 
@@ -79,8 +104,9 @@ BuildResult buildManifest(const QStringList &topLevelPaths, const Limits &limits
 {
     BuildResult result;
     Walker walker{limits, result};
+    QSet<QString> topSeen;
     for (const QString &p : topLevelPaths) {
-        if (!walker.visit(QFileInfo(p), QString())) {
+        if (!walker.visit(QFileInfo(QDir::cleanPath(p)), QString(), topSeen)) {
             result.entries.clear();
             return result;
         }

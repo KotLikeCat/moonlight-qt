@@ -7,6 +7,11 @@
 #include "macpasteboard.h"
 #include "manifestbuilder.h"
 #include "filecodec.h"
+#include "fileserver.h"
+
+#include <QTemporaryDir>
+#include <QSemaphore>
+#include <QMutex>
 
 using namespace ClipboardBundle;
 using Action = ClipboardSyncState::Action;
@@ -48,6 +53,12 @@ private slots:
     void enforcesLimits();
     void renamesDuplicates();
     void skipsTopLevelSymlinkKeepsHidden();
+    void readsFullAndPartialRanges();
+    void shortReadAtEof();
+    void changedFileReportsChanged();
+    void directoryIndexIsIo();
+    void staleOfferReportsGone();
+    void pasteboardFileUrls();
 };
 
 void ClipboardTests::bundleSharedVectors()
@@ -503,6 +514,114 @@ void ClipboardTests::skipsTopLevelSymlinkKeepsHidden()
     QCOMPARE(r.entries.size(), 1);
     QCOMPARE(r.entries[0].relativePath, QString(".hidden"));
     QCOMPARE(r.skipped.size(), 1);
+}
+
+static ClipboardFiles::Entry makeTempEntry(const QString& dirPath, const QByteArray& data)
+{
+    const QString path = dirPath + "/f.bin";
+    QFile f(path);
+    f.open(QIODevice::WriteOnly);
+    f.write(data);
+    f.close();
+    const QFileInfo info(path);
+    return ClipboardFiles::Entry{false, quint64(info.size()), info.lastModified().toMSecsSinceEpoch(), "f.bin", path};
+}
+
+void ClipboardTests::readsFullAndPartialRanges()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {makeTempEntry(dir.path(), "0123456789")};
+    auto r = FileServer::readRange(e, 0, 0, 10);
+    QVERIFY(r.error.isEmpty());
+    QCOMPARE(r.body, QByteArray("0123456789"));
+    r = FileServer::readRange(e, 0, 3, 4);
+    QVERIFY(r.error.isEmpty());
+    QCOMPARE(r.body, QByteArray("3456"));
+}
+
+void ClipboardTests::shortReadAtEof()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {makeTempEntry(dir.path(), "0123456789")};
+    auto r = FileServer::readRange(e, 0, 8, 100);
+    QVERIFY(r.error.isEmpty());
+    QCOMPARE(r.body, QByteArray("89"));
+    r = FileServer::readRange(e, 0, 10, 100);
+    QVERIFY(r.error.isEmpty());
+    QVERIFY(r.body.isEmpty());
+}
+
+void ClipboardTests::changedFileReportsChanged()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {makeTempEntry(dir.path(), "0123456789")};
+    QFile f(e[0].absolutePath);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Append));
+    f.write("more");
+    f.close();
+    QCOMPARE(FileServer::readRange(e, 0, 0, 4).error, QByteArray("changed"));
+    QVector<ClipboardFiles::Entry> missing = {e[0]};
+    missing[0].absolutePath = dir.path() + "/nope";
+    QCOMPARE(FileServer::readRange(missing, 0, 0, 4).error, QByteArray("changed"));
+}
+
+void ClipboardTests::directoryIndexIsIo()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {ClipboardFiles::Entry{true, 0, 0, "d", dir.path()},
+                                        makeTempEntry(dir.path(), "x")};
+    QCOMPARE(FileServer::readRange(e, 0, 0, 4).error, QByteArray("io"));
+    QCOMPARE(FileServer::readRange(e, 7, 0, 4).error, QByteArray("io"));
+}
+
+void ClipboardTests::staleOfferReportsGone()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> e = {makeTempEntry(dir.path(), "0123456789")};
+    QMutex mutex;
+    QVector<QPair<quint32, FileServer::Reply>> got;
+    QSemaphore sem;
+    {
+        FileServer server(nullptr, 2);
+        server.setSenderForTests([&](const FileServer::Job& job, const FileServer::Reply& reply) {
+            QMutexLocker l(&mutex);
+            got.append({job.requestId, reply});
+            sem.release();
+        });
+        server.setOffer(testOfferId(), e);
+        QByteArray other = testOfferId();
+        other[0] = char(0x77);
+        server.request(other, 1, 0, 0, 4);
+        server.request(testOfferId(), 2, 0, 2, 3);
+        QVERIFY(sem.tryAcquire(2, 5000));
+        server.clearOffer();
+        server.request(testOfferId(), 3, 0, 0, 4);
+        QVERIFY(sem.tryAcquire(1, 5000));
+    }
+    QMap<quint32, FileServer::Reply> byReq;
+    for (const auto& p : got) byReq[p.first] = p.second;
+    QCOMPARE(byReq[1].error, QByteArray("gone"));
+    QCOMPARE(byReq[2].body, QByteArray("234"));
+    QVERIFY(byReq[2].error.isEmpty());
+    QCOMPARE(byReq[3].error, QByteArray("gone"));
+}
+
+void ClipboardTests::pasteboardFileUrls()
+{
+    QTemporaryDir dir;
+    const QString path = dir.path() + "/a.txt";
+    QFile f(path);
+    f.open(QIODevice::WriteOnly);
+    f.write("x");
+    f.close();
+    NSPasteboard* raw = [NSPasteboard pasteboardWithName:@"com.moonlight.clipboard-tests.fileurls"];
+    [raw clearContents];
+    [raw writeObjects:@[[NSURL fileURLWithPath:path.toNSString()]]];
+    MacPasteboard board(QStringLiteral("com.moonlight.clipboard-tests.fileurls"));
+    const QStringList urls = board.fileURLs();
+    QCOMPARE(urls.size(), 1);
+    QCOMPARE(QFileInfo(urls[0]).canonicalFilePath(), QFileInfo(path).canonicalFilePath());
+    board.releaseForTests();
 }
 
 QTEST_GUILESS_MAIN(ClipboardTests)

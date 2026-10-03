@@ -14,6 +14,9 @@ SOURCES += \
     $$CLIPBOARD_DIR/clipboardsyncstate.cpp \
     $$CLIPBOARD_DIR/files/manifestbuilder.cpp \
     $$CLIPBOARD_DIR/files/filecodec.cpp \
+    $$CLIPBOARD_DIR/files/fileserver.cpp \
     $$CLIPBOARD_DIR/macpasteboard.mm
+
+HEADERS += $$CLIPBOARD_DIR/files/fileserver.h
 
 LIBS += -framework AppKit

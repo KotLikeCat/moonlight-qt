@@ -235,12 +235,18 @@ void Session::clClipboardChanged(uint32_t seq, uint32_t formats)
 
 void Session::clClipboardFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length)
 {
-    // Task C3 wires clipboard file download handling here
+#ifdef Q_OS_DARWIN
+    // Invoked on moonlight-common-c's async callback thread; see clClipboardChanged().
+    if (s_ActiveSession != nullptr && s_ActiveSession->m_ClipboardSync != nullptr) {
+        s_ActiveSession->m_ClipboardSync->notifyFileRequest(offerId, requestId, fileIndex, offset, length);
+    }
+#else
     Q_UNUSED(offerId);
     Q_UNUSED(requestId);
     Q_UNUSED(fileIndex);
     Q_UNUSED(offset);
     Q_UNUSED(length);
+#endif
 }
 
 void Session::clRumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger)

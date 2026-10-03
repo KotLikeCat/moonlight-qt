@@ -101,6 +101,7 @@ public:
     QString gpuModel;
     bool isSupportedServerVersion;
     int clipboardSyncVersion = 0;
+    bool clipboardFilesSupported = false;
     bool microphoneSupported = false;
 
     // Persisted traits

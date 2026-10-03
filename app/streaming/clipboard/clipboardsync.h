@@ -2,12 +2,17 @@
 
 #include "clipboardsyncstate.h"
 
+#include <QByteArray>
 #include <QObject>
+#include <QVector>
+
+#include "files/manifestbuilder.h"
 
 #include <cstdint>
 #include <deque>
 #include <functional>
 
+class FileServer;
 class MacPasteboard;
 class NvComputer;
 class NvHTTP;
@@ -26,6 +31,8 @@ public:
     void notifyHostChanged(uint32_t seq, uint32_t formats);
     void notifyFocusGained();
     void notifyFocusLost();
+    // Thread-safe (called on the moonlight-common-c callback thread): queues a host range request.
+    void notifyFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length);
     // Stops the worker thread and deletes this object asynchronously. Do not use the pointer afterwards.
     void shutdownAsync();
 
@@ -35,6 +42,7 @@ private:
     void handle(ClipboardSyncState::Action action);
     void fetch(uint32_t formatsMask);
     void push();
+    bool pushFiles(const QStringList& paths, long changeCount);
     void runOrDefer(std::function<void()> work);
     void drainDeferred();
     void finishShutdown();
@@ -46,6 +54,8 @@ private:
     ClipboardSyncState m_State;
     bool m_FetchDisabled = false;
     bool m_PushDisabled = false;
+    bool m_FilesDisabled = false;
+    FileServer* m_FileServer = nullptr;
     // NvHTTP spins a nested event loop, so queued events (notifications, timers,
     // shutdown) can arrive while a request is in flight; they are deferred.
     bool m_InRequest = false;

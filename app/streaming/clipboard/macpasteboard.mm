@@ -89,6 +89,21 @@ QVector<Item> MacPasteboard::read() const
     return items;
 }
 
+QStringList MacPasteboard::fileURLs() const
+{
+    QStringList paths;
+    @autoreleasepool {
+        NSArray* urls = [board(m_Pasteboard) readObjectsForClasses:@[[NSURL class]]
+                                                           options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+        for (NSURL* url in urls) {
+            if (url.isFileURL && url.path.length > 0) {
+                paths.append(QString::fromNSString(url.path));
+            }
+        }
+    }
+    return paths;
+}
+
 long MacPasteboard::write(const QVector<Item>& items)
 {
     @autoreleasepool {

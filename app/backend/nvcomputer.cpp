@@ -166,6 +166,9 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     QString clipboardSync = NvHTTP::getXmlString(serverInfo, "ClipboardSync");
     this->clipboardSyncVersion = clipboardSync.isEmpty() ? 0 : clipboardSync.toInt();
 
+    QString clipboardFiles = NvHTTP::getXmlString(serverInfo, "ClipboardFiles");
+    this->clipboardFilesSupported = !clipboardFiles.isEmpty() && clipboardFiles.toInt() >= 1;
+
     QString microphone = NvHTTP::getXmlString(serverInfo, "Microphone");
     this->microphoneSupported = !microphone.isEmpty() && microphone.toInt() >= 1;
 
@@ -575,6 +578,7 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(isNvidiaServerSoftware);
     ASSIGN_IF_CHANGED(maxLumaPixelsHEVC);
     ASSIGN_IF_CHANGED(clipboardSyncVersion);
+    ASSIGN_IF_CHANGED(clipboardFilesSupported);
     ASSIGN_IF_CHANGED(microphoneSupported);
     ASSIGN_IF_CHANGED(gpuModel);
     ASSIGN_IF_CHANGED_AND_NONNULL(serverCert);

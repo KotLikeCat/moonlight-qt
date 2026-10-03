@@ -211,6 +211,7 @@ SOURCES += \
     streaming/clipboard/clipboardsyncstate.cpp \
     streaming/clipboard/files/manifestbuilder.cpp \
     streaming/clipboard/files/filecodec.cpp \
+    streaming/clipboard/files/fileserver.cpp \
     wm.cpp
 
 HEADERS += \
@@ -238,6 +239,7 @@ HEADERS += \
     streaming/clipboard/clipboardsyncstate.h \
     streaming/clipboard/files/manifestbuilder.h \
     streaming/clipboard/files/filecodec.h \
+    streaming/clipboard/files/fileserver.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/audio/audiodevice.h \

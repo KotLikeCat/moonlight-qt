@@ -627,3 +627,41 @@ NvHTTP::postClipboardBundle(const QByteArray& bundle, int timeoutMs)
     delete reply;
     return status;
 }
+
+int
+NvHTTP::postClipboardFiles(const QByteArray& mlcf, int timeoutMs)
+{
+    QNetworkRequest request = buildRequest(m_BaseUrlHttps, "actions/clipboard", "type=files");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->post(request, mlcf);
+    waitForReply(reply, timeoutMs, NvLogLevel::NVLL_ERROR);
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    delete reply;
+    return status;
+}
+
+int
+NvHTTP::postClipboardFileChunk(const QByteArray& offerHex, quint32 req, quint32 file, quint64 offset,
+                               const QByteArray& body, const QByteArray& errorCode, int timeoutMs)
+{
+    QString arguments = QString("type=file-chunk&offer=%1&req=%2&file=%3&offset=%4")
+            .arg(QString::fromLatin1(offerHex)).arg(req).arg(file).arg(offset);
+    QNetworkRequest request = buildRequest(m_BaseUrlHttps, "actions/clipboard", arguments);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
+    if (!errorCode.isEmpty()) {
+        request.setRawHeader("X-Clipboard-Error", errorCode);
+    }
+
+    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->post(request, errorCode.isEmpty() ? body : QByteArray());
+    waitForReply(reply, timeoutMs, NvLogLevel::NVLL_ERROR);
+    disconnect(sslErrorsConnection);
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    delete reply;
+    return status;
+}

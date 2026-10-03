@@ -196,6 +196,12 @@ public:
     ClipboardResponse getClipboardBundle(quint32 formatsMask, int timeoutMs);
     // POST /actions/clipboard?type=bundle. Returns the HTTP status (0 = network error or timeout).
     int postClipboardBundle(const QByteArray& bundle, int timeoutMs);
+    // POST /actions/clipboard?type=files (MLCF manifest). Returns the HTTP status (0 = network error or timeout).
+    int postClipboardFiles(const QByteArray& mlcf, int timeoutMs);
+    // POST /actions/clipboard?type=file-chunk. errorCode ("gone", "changed", "io") is sent as X-Clipboard-Error
+    // with an empty body. Returns the HTTP status (0 = network error or timeout).
+    int postClipboardFileChunk(const QByteArray& offerHex, quint32 req, quint32 file, quint64 offset,
+                               const QByteArray& body, const QByteArray& errorCode, int timeoutMs);
 
 private:
     QNetworkRequest buildRequest(QUrl baseUrl, QString command, QString arguments);

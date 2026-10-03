@@ -2,6 +2,8 @@
 
 #include "clipboardbundle.h"
 #include "macpasteboard.h"
+#include "files/filecodec.h"
+#include "files/fileserver.h"
 
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
@@ -15,6 +17,9 @@ namespace {
 constexpr int kQuickFetchDelayMs = 300;
 constexpr int kSmallTimeoutMs = 5000;
 constexpr int kImageTimeoutMs = 20000;
+constexpr int kFilePostTimeoutMs = 30000;
+constexpr int kManifestTimeoutMs = 20000;
+constexpr int kMaxManifestBytes = 32 * 1024 * 1024;
 constexpr uint32_t kQuickFormats = ClipboardBundle::FormatText | ClipboardBundle::FormatHtml | ClipboardBundle::FormatRtf;
 }
 
@@ -29,6 +34,19 @@ ClipboardSync* ClipboardSync::createForSession(NvComputer* computer, bool enable
 ClipboardSync::ClipboardSync(NvComputer* computer)
     : m_Computer(computer)
 {
+    // Created here, before the pointer is published to the callback thread. Each file
+    // worker thread owns its own NvHTTP (created and destroyed on that thread).
+    m_FileServer = new FileServer(computer, 4);
+    m_FileServer->setSenderFactory([computer]() -> FileServer::Sender {
+        auto http = std::make_shared<NvHTTP>(computer);
+        return [http](const FileServer::Job& job, const FileServer::Reply& reply) {
+            const int status = http->postClipboardFileChunk(job.offerId.toHex(), job.requestId, job.fileIndex,
+                                                            job.offset, reply.body, reply.error, kFilePostTimeoutMs);
+            if (status != 200 && status != 410) {
+                qWarning() << "Clipboard file chunk POST failed with HTTP status" << status;
+            }
+        };
+    });
     QThread* thread = new QThread();
     // We are constructed on a short-lived thread; give the QThread the main thread's
     // affinity so the queued deleteLater from finished() is actually processed.
@@ -85,6 +103,11 @@ void ClipboardSync::notifyFocusLost()
     }, Qt::QueuedConnection);
 }
 
+void ClipboardSync::notifyFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length)
+{
+    m_FileServer->request(QByteArray(reinterpret_cast<const char*>(offerId), 16), requestId, fileIndex, offset, length);
+}
+
 void ClipboardSync::shutdownAsync()
 {
     QMetaObject::invokeMethod(this, [this]() {
@@ -129,6 +152,8 @@ void ClipboardSync::finishShutdown()
     if (m_QuickFetchTimer != nullptr) {
         m_QuickFetchTimer->stop();
     }
+    delete m_FileServer;   // joins the file workers
+    m_FileServer = nullptr;
     delete m_Http;
     m_Http = nullptr;
     delete m_Pasteboard;
@@ -223,6 +248,13 @@ void ClipboardSync::fetch(uint32_t formatsMask)
 void ClipboardSync::push()
 {
     const long changeCount = m_Pasteboard->changeCount();
+    const QStringList filePaths = m_Pasteboard->fileURLs();
+    if (!filePaths.isEmpty()) {
+        if (!pushFiles(filePaths, changeCount)) {
+            m_State.onPushSkipped(changeCount);
+        }
+        return;
+    }
     QVector<ClipboardBundle::Item> items = m_Pasteboard->read();
     if (items.isEmpty() || !ClipboardBundle::fitToLimit(items, ClipboardBundle::MaxBytes)) {
         // Nothing we can send for this pasteboard version; don't retry it.
@@ -257,4 +289,56 @@ void ClipboardSync::push()
     }
     m_State.onPushSucceeded(changeCount);
     qInfo() << "Clipboard: sent Mac clipboard, formats" << ClipboardBundle::maskOf(items) << "bytes" << bundle.size();
+}
+
+// Offers the copied files to the host. Returns false when this pasteboard version
+// must not be retried (the caller marks it skipped); true when handled (sent, or
+// failed in a way that a later focus gain may retry).
+bool ClipboardSync::pushFiles(const QStringList& paths, long changeCount)
+{
+    if (m_Pasteboard->hasSensitiveData() || m_FilesDisabled || !m_Computer->clipboardFilesSupported) {
+        return false;
+    }
+
+    const ClipboardFiles::BuildResult built = ClipboardFiles::buildManifest(paths);
+    if (!built.error.isEmpty() || built.entries.isEmpty()) {
+        qWarning() << "Clipboard files not offered:" << (built.error.isEmpty() ? QStringLiteral("nothing to send") : built.error);
+        return false;
+    }
+    if (!built.skipped.isEmpty()) {
+        qInfo() << "Clipboard files: skipped" << built.skipped.size() << "unsupported entries";
+    }
+    const QByteArray offerId = ClipboardFiles::newOfferId();
+    const QByteArray manifest = ClipboardFiles::encodeManifest(offerId, built.entries);
+    if (manifest.size() > kMaxManifestBytes) {
+        qWarning() << "Clipboard files not offered: manifest too large";
+        return false;
+    }
+
+    // Register the offer first: the host may request ranges before the POST returns.
+    m_FileServer->setOffer(offerId, built.entries);
+    m_InRequest = true;
+    const int status = m_Http->postClipboardFiles(manifest, kManifestTimeoutMs);
+    m_InRequest = false;
+    if (m_ShutdownRequested) {
+        finishShutdown();
+        return true;
+    }
+    if (status == 200) {
+        m_State.onPushSucceeded(changeCount);
+        qInfo() << "Clipboard: offered" << built.entries.size() << "file entries to the host";
+        return true;
+    }
+    m_FileServer->clearOffer();
+    if (status == 401 || status == 403) {
+        m_FilesDisabled = true;
+        qWarning() << "Clipboard file offers disabled for this session: the host denied file upload";
+        return false;
+    }
+    if (status == 400 || status == 413) {
+        qWarning() << "Clipboard file offer rejected by the host with HTTP status" << status;
+        return false;
+    }
+    qWarning() << "Clipboard file offer failed with HTTP status" << status;
+    return true;
 }

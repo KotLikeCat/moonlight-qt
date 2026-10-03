@@ -66,7 +66,8 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
     Session::clSetAdaptiveTriggers,
-    Session::clClipboardChanged
+    Session::clClipboardChanged,
+    Session::clClipboardFileRequest
 };
 
 Session* Session::s_ActiveSession;
@@ -230,6 +231,16 @@ void Session::clClipboardChanged(uint32_t seq, uint32_t formats)
     Q_UNUSED(seq);
     Q_UNUSED(formats);
 #endif
+}
+
+void Session::clClipboardFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length)
+{
+    // Task C3 wires clipboard file download handling here
+    Q_UNUSED(offerId);
+    Q_UNUSED(requestId);
+    Q_UNUSED(fileIndex);
+    Q_UNUSED(offset);
+    Q_UNUSED(length);
 }
 
 void Session::clRumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger)

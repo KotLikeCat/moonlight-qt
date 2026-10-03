@@ -218,6 +218,9 @@ private:
     void clClipboardChanged(uint32_t seq, uint32_t formats);
 
     static
+    void clClipboardFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length);
+
+    static
     void clRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor);
 
     static

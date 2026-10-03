@@ -35,7 +35,7 @@ public:
     void notifyFocusLost();
     // Thread-safe (called on the moonlight-common-c callback thread): queues a host range request.
     void notifyFileRequest(const uint8_t offerId[16], uint32_t requestId, uint32_t fileIndex, uint64_t offset, uint32_t length);
-    // Shows a transient message to the user (an empty string clears it). Invoked on the worker thread;
+    // Delivers a user-facing message (the session shows it as a dialog). Invoked on the worker thread;
     // the handler must be thread-safe. Cleared synchronously by shutdownAsync(), so it is never called after that returns.
     using NoticeHandler = std::function<void(const QString&)>;
     void setNoticeHandler(NoticeHandler handler);
@@ -66,7 +66,6 @@ private:
     FileServer* m_FileServer = nullptr;
     std::mutex m_NoticeMutex;
     NoticeHandler m_NoticeHandler;
-    QTimer* m_NoticeTimer = nullptr;
     // Host file-capability tracking (worker thread only).
     bool m_FilesCapUnknown = false;
     bool m_HaveCapRefresh = false;

@@ -22,7 +22,6 @@ constexpr int kSmallTimeoutMs = 5000;
 constexpr int kImageTimeoutMs = 20000;
 constexpr int kFilePostTimeoutMs = 30000;
 constexpr int kManifestTimeoutMs = 20000;
-constexpr int kNoticeDurationMs = 5000;
 constexpr auto kCapRefreshInterval = std::chrono::seconds(30);
 constexpr int kMaxManifestBytes = 32 * 1024 * 1024;
 constexpr uint32_t kQuickFormats = ClipboardBundle::FormatText | ClipboardBundle::FormatHtml | ClipboardBundle::FormatRtf;
@@ -106,15 +105,6 @@ void ClipboardSync::initInWorker()
     // NvHTTP's QNetworkAccessManager must be created on the thread that uses it.
     m_Http = new NvHTTP(m_Computer);
     m_Pasteboard = new MacPasteboard();
-    m_NoticeTimer = new QTimer(this);
-    m_NoticeTimer->setSingleShot(true);
-    m_NoticeTimer->setInterval(kNoticeDurationMs);
-    connect(m_NoticeTimer, &QTimer::timeout, this, [this]() {
-        std::lock_guard<std::mutex> lock(m_NoticeMutex);
-        if (m_NoticeHandler) {
-            m_NoticeHandler(QString());
-        }
-    });
     m_QuickFetchTimer = new QTimer(this);
     m_QuickFetchTimer->setSingleShot(true);
     m_QuickFetchTimer->setInterval(kQuickFetchDelayMs);
@@ -176,9 +166,6 @@ void ClipboardSync::showNotice(const QString& reason)
             m_NoticeHandler(text);
         }
     }
-    if (m_NoticeTimer != nullptr) {
-        m_NoticeTimer->start();
-    }
 }
 
 void ClipboardSync::shutdownAsync()
@@ -226,9 +213,6 @@ void ClipboardSync::finishShutdown()
     m_ShutdownFinished = true;
     if (m_QuickFetchTimer != nullptr) {
         m_QuickFetchTimer->stop();
-    }
-    if (m_NoticeTimer != nullptr) {
-        m_NoticeTimer->stop();
     }
     delete m_FileServer;   // joins the file workers
     m_FileServer = nullptr;

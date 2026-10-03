@@ -1,3 +1,5 @@
+#include <atomic>
+#include <string>
 #include "session.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
@@ -33,6 +35,10 @@
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_GAMECONTROLLER_SET_ADAPTIVE_TRIGGERS 105
+#define SDL_CODE_CLIPBOARD_FILES_NOTICE 106
+
+// Notice events queued but not yet handled; used to show only the latest one.
+static std::atomic<int> s_ClipboardNoticesPending{0};
 
 #include <openssl/rand.h>
 
@@ -1764,28 +1770,27 @@ bool Session::startConnectionAsync()
     // current clipboard as soon as the control stream connects.
     m_ClipboardSync = ClipboardSync::createForSession(m_Computer, m_Preferences->clipboardSync);
     if (m_ClipboardSync != nullptr) {
-        // Transient "files were not shared" message, shown in the stream window via the status overlay.
-        // Called on the clipboard worker thread; cleared by shutdownAsync() before this Session goes away.
-        // Only touches the overlay when it is free or still shows our own text (called under ClipboardSync's mutex).
-        auto ours = std::make_shared<QByteArray>();
-        m_ClipboardSync->setNoticeHandler([this, ours](const QString& text) {
-            const bool enabled = m_OverlayManager.isOverlayEnabled(Overlay::OverlayStatusUpdate);
-            const char* current = m_OverlayManager.getOverlayText(Overlay::OverlayStatusUpdate);
-            const bool isOurs = enabled && !ours->isEmpty() && current != nullptr && *ours == current;
+        // "Files were not shared" message: handed to the SDL event loop, which shows a dialog.
+        // The handler touches no Session state (only SDL_PushEvent, which is thread-safe), so it stays
+        // safe even if it runs while the Session is shutting down; the event is then simply never handled.
+        m_ClipboardSync->setNoticeHandler([](const QString& text) {
             if (text.isEmpty()) {
-                if (isOurs) {
-                    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
-                }
-                ours->clear();
                 return;
             }
-            if (m_MouseEmulationRefCount > 0 || (enabled && !isOurs && current != nullptr && *current != '\0')) {
-                qInfo() << "Clipboard notice not shown, the status overlay is in use:" << text;
+            const QByteArray utf8 = text.toUtf8();
+            char* copy = SDL_strdup(utf8.constData());
+            if (copy == nullptr) {
                 return;
             }
-            *ours = text.toUtf8();
-            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, ours->constData());
-            m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+            s_ClipboardNoticesPending++;
+            SDL_Event event = {};
+            event.type = SDL_USEREVENT;
+            event.user.code = SDL_CODE_CLIPBOARD_FILES_NOTICE;
+            event.user.data1 = copy;
+            if (SDL_PushEvent(&event) < 0) {
+                s_ClipboardNoticesPending--;
+                SDL_free(copy);
+            }
         });
     }
 #endif
@@ -2176,6 +2181,19 @@ void Session::exec()
                 m_InputHandler->setAdaptiveTriggers((uint16_t)(uintptr_t)event.user.data1,
                                                     (DualSenseOutputReport *)event.user.data2);
                 break;
+            case SDL_CODE_CLIPBOARD_FILES_NOTICE:
+            {
+                const std::string text(static_cast<const char*>(event.user.data1));
+                SDL_free(event.user.data1);
+                // Coalesce: if newer notices are queued behind this one, only the latest is shown.
+                if (--s_ClipboardNoticesPending == 0) {
+                    // Release the mouse so the user can click the dialog; regaining focus recaptures it.
+                    m_InputHandler->setCaptureActive(false);
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Files not shared",
+                                             (text + ".").c_str(), m_Window);
+                }
+                break;
+            }
             default:
                 SDL_assert(false);
             }

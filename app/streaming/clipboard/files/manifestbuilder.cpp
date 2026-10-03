@@ -39,7 +39,10 @@ struct Walker {
             result.skipped.append(info.absoluteFilePath());
             return true;
         }
-        const QString name = uniqueName(info.fileName().normalized(QString::NormalizationForm_C), seen);
+        // The host rejects '\\' in names; map it before collision renaming so one such name cannot sink the offer.
+        QString baseName = info.fileName().normalized(QString::NormalizationForm_C);
+        baseName.replace(QLatin1Char('\\'), QLatin1Char('_'));
+        const QString name = uniqueName(baseName, seen);
         if (name.size() > limits.maxComponentUtf16) {
             return fail(QStringLiteral("name too long: ") + name);
         }
@@ -115,6 +118,30 @@ BuildResult buildManifest(const QStringList &topLevelPaths, const Limits &limits
         result.error = QStringLiteral("no files");
     }
     return result;
+}
+
+QString hostRejectReason(const QByteArray &token, int status)
+{
+    if (token == "windows_path_too_long") {
+        return QStringLiteral("a path is too long for Windows (259 characters)");
+    }
+    if (token == "too_many_entries") {
+        return QStringLiteral("too many files and folders");
+    }
+    if (token == "path_too_long") {
+        return QStringLiteral("a path is too long");
+    }
+    if (token == "component_too_long") {
+        return QStringLiteral("a file or folder name is too long");
+    }
+    if (status == 403) {
+        return QStringLiteral("permission denied by the host");
+    }
+    if (status == 503) {
+        return QStringLiteral("the host cannot receive files right now");
+    }
+    return QStringLiteral("rejected by host (%1)")
+        .arg(token.isEmpty() ? QString::number(status) : QString::fromLatin1(token));
 }
 
 }

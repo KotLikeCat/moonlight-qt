@@ -44,6 +44,14 @@ public:
     void setSenderFactory(SenderFactory factory);
     void setSenderForTests(Sender sender);
 
+    // A snapshot of the offer the host currently holds, used to roll back a failed offer POST.
+    struct Offer {
+        QByteArray id;   // empty = no offer
+        std::shared_ptr<const QVector<ClipboardFiles::Entry>> entries;
+    };
+    Offer currentOffer();
+    void restoreOffer(const Offer& offer);
+
     void setOffer(const QByteArray& offerId16, const QVector<ClipboardFiles::Entry>& entries);
     void clearOffer();
     void request(const QByteArray& offerId16, quint32 requestId, quint32 fileIndex, quint64 offset, quint32 length);

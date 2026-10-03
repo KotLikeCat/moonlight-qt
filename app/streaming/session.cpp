@@ -1763,6 +1763,23 @@ bool Session::startConnectionAsync()
     // Created before the connection starts: the host greets new sessions with its
     // current clipboard as soon as the control stream connects.
     m_ClipboardSync = ClipboardSync::createForSession(m_Computer, m_Preferences->clipboardSync);
+    if (m_ClipboardSync != nullptr) {
+        // Transient "files were not shared" message, shown in the stream window via the status overlay.
+        // Called on the clipboard worker thread; cleared by shutdownAsync() before this Session goes away.
+        m_ClipboardSync->setNoticeHandler([this](const QString& text) {
+            if (m_MouseEmulationRefCount > 0) {
+                // Mouse emulation owns the status overlay
+                return;
+            }
+            if (text.isEmpty()) {
+                m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+                return;
+            }
+            const QByteArray utf8 = text.toUtf8();
+            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, utf8.constData());
+            m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+        });
+    }
 #endif
 
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,

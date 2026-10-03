@@ -52,6 +52,9 @@ private slots:
     void skipsSymlinksAndDsStore();
     void enforcesLimits();
     void renamesDuplicates();
+    void backslashNamesAreMapped();
+    void hostRejectReasons();
+    void restoreOfferKeepsPreviousOffer();
     void skipsTopLevelSymlinkKeepsHidden();
     void readsFullAndPartialRanges();
     void shortReadAtEof();
@@ -474,6 +477,39 @@ static void touch(const QString& path)
     f.close();
 }
 
+void ClipboardTests::backslashNamesAreMapped()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QDir root(tmp.path());
+    QVERIFY(root.mkpath("dir"));
+    touch(root.filePath("a\\b.txt"));
+    touch(root.filePath("a_b.txt"));
+    touch(root.filePath("dir/c\\d.txt"));
+    auto r = ClipboardFiles::buildManifest({root.filePath("a\\b.txt"), root.filePath("a_b.txt"), root.filePath("dir")});
+    QVERIFY2(r.error.isEmpty(), qPrintable(r.error));
+    QStringList rels;
+    for (auto& e : r.entries) {
+        QVERIFY(!e.relativePath.contains(QLatin1Char('\\')));
+        rels << e.relativePath;
+    }
+    // Mapping happens before collision renaming, so the second a_b.txt gets a suffix.
+    QCOMPARE(rels, (QStringList{"a_b.txt", "a_b (2).txt", "dir", "dir/c_d.txt"}));
+    QVERIFY(r.entries[0].absolutePath.endsWith("a\\b.txt"));
+}
+
+void ClipboardTests::hostRejectReasons()
+{
+    using ClipboardFiles::hostRejectReason;
+    QCOMPARE(hostRejectReason("windows_path_too_long", 400), QStringLiteral("a path is too long for Windows (259 characters)"));
+    QCOMPARE(hostRejectReason("too_many_entries", 400), QStringLiteral("too many files and folders"));
+    QCOMPARE(hostRejectReason("component_too_long", 400), QStringLiteral("a file or folder name is too long"));
+    QCOMPARE(hostRejectReason("", 403), QStringLiteral("permission denied by the host"));
+    QCOMPARE(hostRejectReason("", 503), QStringLiteral("the host cannot receive files right now"));
+    QCOMPARE(hostRejectReason("nul", 400), QStringLiteral("rejected by host (nul)"));
+    QCOMPARE(hostRejectReason("", 500), QStringLiteral("rejected by host (500)"));
+}
+
 void ClipboardTests::renamesDuplicates()
 {
     QTemporaryDir tmp;
@@ -614,6 +650,41 @@ void ClipboardTests::rangeLengthIsClamped()
     QCOMPARE(FileServer::readRange(e, 0, 0, 0).error, QByteArray("io"));
     QCOMPARE(FileServer::readRange(e, 0, 0, 4u * 1024 * 1024 + 1).error, QByteArray("io"));
     QVERIFY(FileServer::readRange(e, 0, 0, 4u * 1024 * 1024).error.isEmpty());
+}
+
+void ClipboardTests::restoreOfferKeepsPreviousOffer()
+{
+    QTemporaryDir dir;
+    QVector<ClipboardFiles::Entry> a = {makeTempEntry(dir.path(), "0123456789")};
+    QTemporaryDir dir2;
+    QVector<ClipboardFiles::Entry> b = {makeTempEntry(dir2.path(), "abcdefghij")};
+    QByteArray idB = testOfferId();
+    idB[0] = char(0x55);
+    QMutex mutex;
+    QMap<quint32, FileServer::Reply> byReq;
+    QSemaphore sem;
+    {
+        FileServer server(1);
+        server.setSenderForTests([&](const FileServer::Job& job, const FileServer::Reply& reply) {
+            QMutexLocker l(&mutex);
+            byReq[job.requestId] = reply;
+            sem.release();
+        });
+        server.setOffer(testOfferId(), a);
+        const FileServer::Offer previous = server.currentOffer();
+        server.setOffer(idB, b);
+        server.restoreOffer(previous);   // the POST for B failed
+        server.request(testOfferId(), 1, 0, 0, 4);
+        server.request(idB, 2, 0, 0, 4);
+        QVERIFY(sem.tryAcquire(2, 5000));
+        // Restoring "no offer" clears.
+        server.restoreOffer(FileServer::Offer());
+        server.request(testOfferId(), 3, 0, 0, 4);
+        QVERIFY(sem.tryAcquire(1, 5000));
+    }
+    QCOMPARE(byReq[1].body, QByteArray("0123"));
+    QCOMPARE(byReq[2].error, QByteArray("gone"));
+    QCOMPARE(byReq[3].error, QByteArray("gone"));
 }
 
 void ClipboardTests::pasteboardFileUrls()

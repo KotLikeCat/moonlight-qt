@@ -185,6 +185,11 @@ public:
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
 
+    // Keeps TLS connections alive between requests (idle expiry below the host's request timeout).
+    // Only for the clipboard file-chunk POSTs; every other request keeps the GFE-safe "no persistent
+    // connections" behaviour. Qt >= 6.3 only; older Qt always closes connections after each request.
+    void setKeepAlive(bool keepAlive) { m_KeepAlive = keepAlive; }
+
     struct ClipboardResponse {
         int httpStatus = 0;   // 0 = network error or timeout
         quint32 seq = 0;
@@ -197,9 +202,11 @@ public:
     // POST /actions/clipboard?type=bundle. Returns the HTTP status (0 = network error or timeout).
     int postClipboardBundle(const QByteArray& bundle, int timeoutMs);
     // POST /actions/clipboard?type=files (MLCF manifest). Returns the HTTP status (0 = network error or timeout).
-    int postClipboardFiles(const QByteArray& mlcf, int timeoutMs);
+    // When errorToken is non-null it receives the host's X-Clipboard-Error header (empty if absent).
+    int postClipboardFiles(const QByteArray& mlcf, int timeoutMs, QByteArray* errorToken = nullptr);
     // POST /actions/clipboard?type=file-chunk. errorCode ("gone", "changed", "io") is sent as X-Clipboard-Error
-    // with an empty body. Returns the HTTP status (0 = network error or timeout).
+    // with an empty body. timeoutMs is an inactivity timeout (no bytes moved for that long), not a wall-clock limit.
+    // Returns the HTTP status (0 = network error or timeout).
     int postClipboardFileChunk(const QByteArray& offerHex, quint32 req, quint32 file, quint64 offset,
                                const QByteArray& body, const QByteArray& errorCode, int timeoutMs);
 
@@ -221,4 +228,5 @@ private:
     QNetworkAccessManager* m_Nam;
     QSslCertificate m_ServerCert;
     bool m_UseTrueUid;
+    bool m_KeepAlive = false;
 };

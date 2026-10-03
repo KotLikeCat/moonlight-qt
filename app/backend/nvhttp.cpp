@@ -507,7 +507,8 @@ NvHTTP::buildRequest(QUrl baseUrl, QString command, QString arguments)
     // Use fine-grained idle timeouts to avoid calling QNetworkAccessManager::clearAccessCache(),
     // which tears down the NAM's global thread each time. We must not keep persistent connections
     // or GFE will puke.
-    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
+    // The clipboard file-chunk worker connections opt in to keep-alive (3 s < the host's 5 s request timeout).
+    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, m_KeepAlive ? 3 : 0);
 #endif
 
     return request;
@@ -539,7 +540,9 @@ NvHTTP::waitForReply(QNetworkReply* reply, int timeoutMs, NvLogLevel logLevel)
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
     // If we couldn't use fine-grained connection idle timeouts, kill them all now
-    m_Nam->clearAccessCache();
+    if (!m_KeepAlive) {
+        m_Nam->clearAccessCache();
+    }
 #endif
 }
 
@@ -629,7 +632,7 @@ NvHTTP::postClipboardBundle(const QByteArray& bundle, int timeoutMs)
 }
 
 int
-NvHTTP::postClipboardFiles(const QByteArray& mlcf, int timeoutMs)
+NvHTTP::postClipboardFiles(const QByteArray& mlcf, int timeoutMs, QByteArray* errorToken)
 {
     QNetworkRequest request = buildRequest(m_BaseUrlHttps, "actions/clipboard", "type=files");
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
@@ -640,6 +643,9 @@ NvHTTP::postClipboardFiles(const QByteArray& mlcf, int timeoutMs)
     disconnect(sslErrorsConnection);
 
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (errorToken != nullptr) {
+        *errorToken = reply->rawHeader("X-Clipboard-Error");
+    }
     delete reply;
     return status;
 }
@@ -657,8 +663,16 @@ NvHTTP::postClipboardFileChunk(const QByteArray& offerHex, quint32 req, quint32 
     }
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    // Inactivity-based timeout: a slow uplink slows the paste down instead of failing the chunk.
+    // waitForReply() gets no wall-clock limit; a stalled transfer finishes the reply with a timeout error.
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    request.setTransferTimeout(timeoutMs);
+    QNetworkReply* reply = m_Nam->post(request, errorCode.isEmpty() ? body : QByteArray());
+    waitForReply(reply, 0, NvLogLevel::NVLL_ERROR);
+#else
     QNetworkReply* reply = m_Nam->post(request, errorCode.isEmpty() ? body : QByteArray());
     waitForReply(reply, timeoutMs, NvLogLevel::NVLL_ERROR);
+#endif
     disconnect(sslErrorsConnection);
 
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();

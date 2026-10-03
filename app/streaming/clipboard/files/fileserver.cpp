@@ -47,6 +47,19 @@ void FileServer::setOffer(const QByteArray& offerId16, const QVector<ClipboardFi
     m_Entries = std::move(copy);
 }
 
+FileServer::Offer FileServer::currentOffer()
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    return Offer{m_OfferId, m_Entries};
+}
+
+void FileServer::restoreOffer(const Offer& offer)
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    m_OfferId = offer.id;
+    m_Entries = offer.entries;
+}
+
 void FileServer::clearOffer()
 {
     std::lock_guard<std::mutex> lock(m_Mutex);

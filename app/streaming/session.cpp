@@ -1773,6 +1773,8 @@ bool Session::startConnectionAsync()
         // "Files were not shared" message: handed to the SDL event loop, which shows a dialog.
         // The handler touches no Session state (only SDL_PushEvent, which is thread-safe), so it stays
         // safe even if it runs while the Session is shutting down; the event is then simply never handled.
+        // Events left unhandled by a previous session must not suppress this session's dialogs.
+        s_ClipboardNoticesPending = 0;
         m_ClipboardSync->setNoticeHandler([](const QString& text) {
             if (text.isEmpty()) {
                 return;
@@ -2186,7 +2188,8 @@ void Session::exec()
                 const std::string text(static_cast<const char*>(event.user.data1));
                 SDL_free(event.user.data1);
                 // Coalesce: if newer notices are queued behind this one, only the latest is shown.
-                if (--s_ClipboardNoticesPending == 0) {
+                if (--s_ClipboardNoticesPending <= 0) {
+                    s_ClipboardNoticesPending = 0;
                     // Release the mouse so the user can click the dialog; regaining focus recaptures it.
                     m_InputHandler->setCaptureActive(false);
                     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Files not shared",
